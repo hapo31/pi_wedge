@@ -40,3 +40,17 @@ Pi 5 8GBでの最大モデル・高精度STEPのRSS/時間/温度、長期運用
 検証用ARM64ツールイメージは `docker build -f deploy/Dockerfile.tools -t pi-wedge-tools:0.1 .`。これはホスト互換性を切り分ける補助環境で、アプリの既定実行方法はホストのCLIである。元ファイル/設定/一時ディレクトリだけをバインドして検証し、秘密をコンテナへ渡さない。
 
 追加検証: Debian12標準サーバーにTOOLS_BACKEND=dockerを設定し、POST /api/slicesのmultipartからSTL/STEPを受信して実ツール処理、S3保存、GET job/file/gcodeまで通した。コンテナtimeout/ラベル回収/回収失敗は自動テスト。環境テンプレートの既定はnative、ローカル.envはこの検証環境に合わせdockerを選択した。
+
+## 添付モデルのスライス（2026-10-13）
+
+`measuring_cup_10ml.step`（約1.6MB）を標準サーバーの `POST /api/slices` にmultipartで送信した。A1 mini 0.4mm / Generic PLA / 積層0.2mm / インフィル15% / サポートなし、メッシュ設定は既定値。実FreeCAD1.0→Orca2.4.2→SeaweedFS保存まで約3.4秒でsucceededとなった。
+
+- ジョブUUID: `e3311bfd-be10-4c13-9cbc-b7d9e1a777e3`
+- 元モデルUUID: `8f0de80d-dd91-42b1-9ee9-72e4b509904b`
+- 結果UUID: `20f9f399-ba9e-493d-9800-70ec2d64264f`
+- gcode.3mf: 468,548bytes、ZIP整合性正常、`Metadata/plate_1.gcode` を抽出できた。
+- G-code: 1,800,698bytes / 74,273行 / 141レイヤー / 高さ28.20mm。
+- 推定時間: 28分59秒（モデル造形22分54秒、準備を含む総時間）。材料5.72g / 1,918.74mm。
+- 実ChromiumでUUIDから取得・3D表示、レイヤー70（高さ14.00mm）への切替、単一レイヤーと移動経路表示を確認。JavaScriptエラーなし。プリンターは無効、印刷ボタンは無効、プリンターAPI呼出し0回。
+
+生成物・検証JSON・スクリーンショットは `.data/measuring-cup-test/`（Git管理外）に保存した。実機への転送・印刷、容量精度や水密性は検証していない。
