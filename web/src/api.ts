@@ -40,22 +40,55 @@ export async function fetchPreview(path: string, init: RequestInit = {}) {
 }
 export function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
-    switch (error.status) {
-      case 403:
-        return 'プレビューページを開き直して操作してください。';
-      case 404:
-        return '指定されたファイルが見つかりません。';
-      case 413:
-        return 'このG-codeはプレビューの上限を超えています。ファイルをダウンロードして確認できます。';
-      case 422:
-        return 'G-codeまたは印刷コンテナが不正です。';
-      case 409:
-        return '現在のファイルやプリンターの状態では操作できません。';
-      case 503:
-        return 'ストレージまたはプリンターが利用できません。';
+    switch (error.code) {
+      case 'printer_disabled':
+        return 'プリンターが未設定です。';
+      case 'printer_busy':
+        return 'プリンターは使用中です。';
+      case 'printer_rejected':
+        return 'プリンターが印刷要求を拒否しました。プリンターの画面を確認してください。';
+      case 'printer_outcome_unknown':
+        return '結果が不明です。プリンターの画面を確認してください。';
+      case 'printer_upload_failed':
+        return 'ファイルを転送できませんでした。プリンターの接続を確認してください。';
+      case 'file_not_ready':
+        return 'ファイルの準備ができていません。';
+      case 'wrong_kind':
+        return 'このファイルはプレビューできません。';
+      case 'preview_busy':
+        return 'プレビューが混み合っています。しばらくしてから開き直してください。';
+      case 'storage_unavailable':
+      case 'storage_size_mismatch':
+      case 'object_missing':
+        return '保存済みファイルを読み込めません。';
+      case 'dependency_unavailable':
+        return 'サーバーが利用できません。しばらくしてから開き直してください。';
+      case 'idempotency_conflict':
+        return '印刷要求が一致しません。プリンターの画面を確認してください。';
     }
-    return error.message;
+    switch (error.status) {
+      case 400:
+        return '操作を受け付けられませんでした。ページを開き直してください。';
+      case 403:
+        return 'プレビューページを開き直してください。';
+      case 404:
+        return 'ファイルが見つかりません。';
+      case 413:
+        return 'プレビューの上限を超えています。ダウンロードして確認してください。';
+      case 422:
+        return '印刷ファイルが不正です。';
+      case 409:
+        return '現在の状態では操作できません。';
+      case 503:
+        return 'サーバーまたはプリンターが利用できません。';
+      case 502:
+        return '印刷できませんでした。プリンターの接続を確認してください。';
+      case 504:
+        return '結果が不明です。プリンターの画面を確認してください。';
+    }
+    return '処理に失敗しました。';
   }
+  if (error instanceof TypeError) return '通信に失敗しました。接続を確認してください。';
   return error instanceof Error ? error.message : '処理に失敗しました。';
 }
 export async function readLimitedText(

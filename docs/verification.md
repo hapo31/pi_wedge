@@ -36,7 +36,7 @@ Pi 5 8GBでの最大モデル・高精度STEPのRSS/時間/温度、長期運用
 ## 再実行
 
 `npm run check`。SeaweedFS稼働時`npm run test:storage`。実ツール設定後`npm run test:slice -- path/to/model.stl path/to/model.step`。既定DB/ストレージへテストモデル・結果が保存されるため、検証専用DATA_DIR/S3_BUCKETで実行する。
-ブラウザ: サーバーを起動して`npx playwright install --with-deps chromium`、`npm run test:e2e`。画像は.data/preview-desktop.png / .data/preview-mobile.png（Git外）。
+ブラウザ: サーバーを起動して`npx playwright install --with-deps chromium`、`npm run test:e2e`。画像はPlaywrightのテスト別出力先にpreview-desktop.png / preview-mobile.pngとして保存する（既定はtest-results/、Git外）。
 検証用ARM64ツールイメージは `docker build -f deploy/Dockerfile.tools -t pi-wedge-tools:0.1 .`。これはホスト互換性を切り分ける補助環境で、アプリの既定実行方法はホストのCLIである。元ファイル/設定/一時ディレクトリだけをバインドして検証し、秘密をコンテナへ渡さない。
 
 追加検証: Debian12標準サーバーにTOOLS_BACKEND=dockerを設定し、POST /api/slicesのmultipartからSTL/STEPを受信して実ツール処理、S3保存、GET job/file/gcodeまで通した。コンテナtimeout/ラベル回収/回収失敗は自動テスト。環境テンプレートの既定はnative、ローカル.envはこの検証環境に合わせdockerを選択した。
@@ -75,3 +75,12 @@ HTTPの既定とローカル `.env` を `HOST=0.0.0.0` に変更し、標準サ�
 
 検証サーバーは会話の実行セッションから独立したsystemdユーザーサービス `pi-wedge.service` で稼働している（Restart=on-failure、既存ユーザーのLinger=yes）。ビルド後は `systemctl --user restart pi-wedge.service`、状態は `systemctl --user status pi-wedge.service` で確認。この検証用ユニットはsystemd-runによる一時ユニットで、OS再起動後の自動起動は本番用unitを設置して設定する。
 実スマートフォンと実プリンターでの検証は未実施。プリンター設定は無効のままで、物理印刷は開始していない。
+
+## ユーザー向け文言の見直し（2026-10-13）
+
+開発規約の文言方針に沿い、画面の用途説明・重複した補足・操作ID・フッターを削除した。操作を「印刷」「ダウンロード」「結果を確認」に短縮し、確認ダイアログはベッド・材料・プレートの確認に絞った。プリンターの設定有無と実際の接続状態を区別し、受付済みと結果不明は別の状態として表示する。印刷失敗時の内部英語メッセージを原因・対処の日本語に置き換えた。
+
+- `npm run check`: 型・Lint・Format・48テスト・サーバー/UIビルド成功。制限環境では既存CLI子プロセステスト2件が失敗したが、制限外での同じチェックは成功した。
+- `npm run test:e2e`: ARM64 Chromiumで3テスト成功。レイヤー・統計・確認取消時0送信・確認後1送信・受付済み・404・結果不明時の操作無効・390px幅を確認した。デスクトップとモバイルの画像も確認した。
+- サーバーは専用一時DATA_DIR・localストレージ・プリンター無効で127.0.0.1:3100に起動した。印刷APIはfixtureで置換し、物理印刷は開始していない。
+- 導入済みブラウザは `/tmp/pi-wedge-browsers` を指定。不足ライブラリを `/tmp/pi-wedge-copy-browser-deps` に展開し、LD_LIBRARY_PATHで参照した。OSへのライブラリ導入はしていない。既存test-resultsの所有権による書込み失敗を避け、`--output=/tmp/pi-wedge-copy-playwright-results` で結果・画像を保存した。

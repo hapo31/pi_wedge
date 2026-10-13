@@ -112,4 +112,25 @@ describe('confirmed print UI controller', () => {
       expect.objectContaining({ message: expect.stringContaining('結果が不明') }),
     );
   });
+  it('shows the transfer failure cause without exposing the adapter message', async () => {
+    const update = vi.fn();
+    await new PrintController(
+      async () => ({
+        id: randomUUID(),
+        state: 'failed',
+        error: {
+          code: 'printer_upload_failed',
+          message: 'FTPS upload or remote size verification failed',
+        },
+      }),
+      update,
+      () => true,
+    ).start(randomUUID());
+    expect(update).toHaveBeenLastCalledWith(
+      expect.objectContaining({
+        busy: false,
+        message: 'ファイルを転送できませんでした。プリンターの接続を確認してください。',
+      }),
+    );
+  });
 });

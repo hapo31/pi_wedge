@@ -4,6 +4,7 @@ import { previewInput } from './preview-input.js';
 import type { WebGLPreview } from 'gcode-preview';
 import type { LineSegments, Material, LineBasicMaterial } from 'three';
 const TRAVEL = '#526373';
+class PreviewError extends Error {}
 function setVisibility(preview: WebGLPreview, layer: number, single: boolean, travel: boolean) {
   for (const group of preview.scene.children) {
     const match = group.name.match(/^layer(\d+)$/);
@@ -42,7 +43,10 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
     void (async () => {
       try {
         const lines = previewInput(text).split('\n');
-        if (lines.length > 250000) throw new Error('G-codeの行数がプレビュー上限を超えています。');
+        if (lines.length > 250000)
+          throw new PreviewError(
+            '行数がプレビューの上限を超えています。ダウンロードして確認してください。',
+          );
         instance = init({
           canvas: element,
           buildVolume: { x: 180, y: 180, z: 180 },
@@ -69,9 +73,11 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
           await new Promise<void>((r) => requestAnimationFrame(() => r()));
         }
         const layers = instance.parser.layers;
-        if (!layers.length) throw new Error('表示できる押出ツールパスがありません。');
+        if (!layers.length) throw new PreviewError('表示できるツールパスがありません。');
         if (layers.some((l) => l.commands.length > 20000))
-          throw new Error('単一レイヤーのパスが多すぎます。ダウンロードして確認してください。');
+          throw new PreviewError(
+            'レイヤーのパスが上限を超えています。ダウンロードして確認してください。',
+          );
         setCount(layers.length);
         setLayer(layers.length);
         let z = 0;
@@ -86,9 +92,9 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
       } catch (e) {
         if (!abort.signal.aborted) {
           setError(
-            e instanceof Error
+            e instanceof PreviewError
               ? e.message
-              : '3D表示に失敗しました。WebGL対応ブラウザを使用してください。',
+              : '3D表示に失敗しました。WebGL対応ブラウザで開いてください。',
           );
           setLoading(false);
           onReady(false);
@@ -114,7 +120,7 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
   return (
     <section className="viewer" aria-label="3Dツールパス">
       <div className="viewport">
-        <canvas ref={canvas} aria-label="マウスで回転・ズーム・移動できるG-codeプレビュー" />
+        <canvas ref={canvas} aria-label="G-codeプレビュー" />
         <div className="plate-label">
           A1 mini <span>180 × 180 × 180 mm</span>
         </div>
@@ -122,7 +128,7 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
         {loading && (
           <div className="viewport-message" role="status">
             <span className="spinner" />
-            ツールパスを準備中 {progress}%
+            読み込み中 {progress}%
           </div>
         )}
         {error && (

@@ -27,24 +27,26 @@ export class PrintController {
     const fingerprint = fileId;
     const key = this.fingerprint === fingerprint && this.state.key ? this.state.key : createUuid();
     this.fingerprint = fingerprint;
-    this.state = { ...this.state, busy: true, message: '転送・印刷開始を要求しています…', key };
+    this.state = { ...this.state, busy: true, message: '印刷要求を送信中…', key };
     this.update({ ...this.state });
     try {
       const operation = await this.send(fileId, key);
       this.state.operation = operation;
       this.state.message =
         operation.state === 'accepted'
-          ? 'プリンターが印刷開始要求を受け付けました。'
+          ? '印刷開始の要求を受け付けました。'
           : operation.state === 'pending'
-            ? '処理中です。同じ操作の結果を再確認できます。'
+            ? '印刷要求を処理中です。'
             : operation.state === 'unknown'
-              ? '結果が不明です。プリンターの画面を確認してください。新しい印刷要求は送信しません。'
-              : `印刷開始に失敗しました: ${operation.error?.message ?? '通信エラー'}`;
+              ? '結果が不明です。プリンターの画面を確認してください。'
+              : operation.error
+                ? errorMessage(new ApiError(502, operation.error.code, operation.error.message))
+                : '印刷できませんでした。';
     } catch (error) {
       this.state.message =
         error instanceof ApiError
           ? errorMessage(error)
-          : '通信に失敗しました。プリンターを確認し、同じ操作の結果を再確認してください。';
+          : '通信に失敗しました。プリンターを確認し、「結果を確認」を押してください。';
     } finally {
       this.state.busy = false;
       this.update({ ...this.state });

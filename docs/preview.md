@@ -1,12 +1,16 @@
 # プレビュー
 
+画面に表示する文言は[開発規約の「ユーザー向け文言」](../AGENTS.md#ユーザー向け文言)に従う。画面と利用目的から伝わる説明を省き、冗長な表現や誇張を加えない。
+
 React + TypeScript、Three.jsベースの[gcode-preview](https://github.com/xyz-tools/gcode-preview)を採用。テキストG-codeを解析・描画するので.gcode.3mfはサーバーのyauzlアダプターでMetadata/plate_1.gcodeを抽出。複数プレートは初期スコープ外。ZIPをディスクへ展開せず、エントリ数・compressed/uncompressed size・実読取byteを制限。暗号化、不正構造、期待パス不存在は422。
 
 `/preview/{uuid}`: 大きな3D viewport、右側ファイル名/UUID/推定時間/材料/接続状態、下部レイヤースライダー。180×180×180mm build volume、回転/ズーム/pan、単一レイヤー/積層表示、travel toggle。印刷は別の目立つボタン→ネイティブ確認ダイアログ→API、実行中disable、恒久冪等キー使用。unknownは成功と表示しない。
 
 AIから受け取った `/preview/{uuid}` を開くだけで、元モデル名・統計・3Dツールパスを自動表示する。トークン入力、APIリンク、UUIDの目立つ表示を省き、スマホで確認して印刷開始する用途に絞る。UIにAPI_TOKENを埋め込まず、データは専用の `/preview/{uuid}/data`・`gcode`・`download` から取得。元モデル本体や一覧は公開しない。403/404/422/413を日本語で表示。
 
-「印刷を開始」は確認後に空のPOSTを `/preview/{uuid}/print` へ送信。同一OriginとIdempotency-Keyをサーバーで検証し、認証済みAI APIと同じPrinterServiceを使用する。Originがない/一致しない要求は403、CORSは許可しない。これは信頼するLANでの運用を前提とする。
+「印刷」は確認後に空のPOSTを `/preview/{uuid}/print` へ送信。同一OriginとIdempotency-Keyをサーバーで検証し、認証済みAI APIと同じPrinterServiceを使用する。Originがない/一致しない要求は403、CORSは許可しない。これは信頼するLANでの運用を前提とする。
+
+操作は「印刷」「ダウンロード」、同じ印刷要求の照会は「結果を確認」と表示する。用途の説明や転送の内部手順、操作ID、フッターの補足は表示しない。印刷前の確認はベッド・材料・プレートに絞る。acceptedは「受付済み」、unknownは「結果不明」とし、印刷中・印刷完了と混同しない。プリンターの設定有無は接続確認の結果として表示しない。エラーはコードに応じた日本語で原因・対処を表示し、APIや描画ライブラリの内部メッセージは直接表示しない。
 
 スマホからは同じLANの `http://ホスト名.local:3000/preview/{uuid}`（mDNS稼働時）または `http://LAN-IP:3000/preview/{uuid}` を使う。APIサーバーの既定待ち受けは `HOST=0.0.0.0`。APIのURLは相対パスなのでアクセスしたホスト名/IPのままデータを取得できる。Viteの開発サーバーを起動せず、ビルド済みUIをAPIサーバーから配信する構成で利用可能。
 

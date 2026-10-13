@@ -20,7 +20,7 @@ npm run dev
 
 同じLAN/Wi-Fiのスマホでは `http://サーバーのLAN-IP:3000/preview/{resultFileId}` を開くだけでプレビューが表示される。サーバーでAvahi等のmDNSが稼働している場合は `http://ホスト名.local:3000/preview/{resultFileId}` でも開ける（例: ホスト名 `raspberrypi` なら `raspberrypi.local`）。実際のIPは `hostname -I`、ホスト名は `hostname` で確認する。ファイアウォールを使う場合はLANからのTCP 3000を許可する。SeaweedFSのS3/管理ポートは引き続きホスト内で利用する。
 
-`npm run check`で型/Lint/Format/47テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
+`npm run check`で型/Lint/Format/48テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
 
 ## 本番
 
@@ -41,7 +41,7 @@ Orca2.4.2の公式ARM64版はglibc条件によりDebian12へ直接導入でき�
 
 ## 利用の流れ
 
-AIにモデル作成を依頼→AIが認証済みAPIでSTL/STEPをスライス→完了したファイルのプレビューURLを受け取る→スマホでURLを開く→3D表示を確認して「印刷を開始」。スマホではログインやAPIトークン入力は不要。印刷開始前に確認ダイアログを表示する。
+AIにモデル作成を依頼→AIが認証済みAPIでSTL/STEPをスライス→完了したファイルのプレビューURLを受け取る→スマホでURLを開く→3D表示を確認して「印刷」。スマホではログインやAPIトークン入力は不要。印刷開始前に確認ダイアログを表示する。
 
 `/api/*` はAI/管理用のBearer認証を維持。`/preview/{uuid}` とその配下の読取・印刷操作は信頼するLAN向けで、指定UUIDのスライス結果だけを扱う。ブラウザ印刷は同一OriginのPOSTと永続的なIdempotency-Keyが必要。
 結果不明の印刷を自動再送しない。同じIdempotency-Keyで結果を参照し、実機確認後にresolve APIを使う。[API使用例](docs/api-design.md)を参照。

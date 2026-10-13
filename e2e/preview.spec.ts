@@ -1,7 +1,9 @@
 import { test, expect } from '@playwright/test';
 import { GCODE } from '../tests/helpers.js';
 const id = '0198cdf0-b8f1-4de0-8d67-2d9e95ed019c';
-test('WebGL layers, stats, confirmation and one explicit print request', async ({ page }) => {
+test('WebGL layers, stats, confirmation and one explicit print request', async ({
+  page,
+}, testInfo) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   let prints = 0;
@@ -46,17 +48,22 @@ test('WebGL layers, stats, confirmation and one explicit print request', async (
   await page.getByLabel('移動経路').check();
   await page.locator('canvas').hover();
   await page.mouse.wheel(0, -120);
-  await page.screenshot({ path: '.data/preview-desktop.png', fullPage: true });
-  page.once('dialog', (dialog) => dialog.dismiss());
-  await page.getByRole('button', { name: '印刷を開始', exact: true }).click();
+  await page.screenshot({ path: testInfo.outputPath('preview-desktop.png'), fullPage: true });
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toBe(
+      '印刷しますか？\nベッドが空で、材料とプレートが合っていることを確認してください。',
+    );
+    void dialog.dismiss();
+  });
+  await page.getByRole('button', { name: '印刷', exact: true }).click();
   expect(prints).toBe(0);
   page.once('dialog', (dialog) => dialog.accept());
-  await page.getByRole('button', { name: '印刷を開始', exact: true }).click();
-  await expect(page.getByRole('button', { name: '開始要求を受付済み' })).toBeDisabled();
+  await page.getByRole('button', { name: '印刷', exact: true }).click();
+  await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
   expect(prints).toBe(1);
   expect(pageErrors).toEqual([]);
   await page.setViewportSize({ width: 390, height: 844 });
-  await page.screenshot({ path: '.data/preview-mobile.png', fullPage: true });
+  await page.screenshot({ path: testInfo.outputPath('preview-mobile.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
     true,
   );
@@ -69,6 +76,50 @@ test('shows a missing file clearly and never enables print', async ({ page }) =>
     }),
   );
   await page.goto(`/preview/${id}`);
-  await expect(page.getByRole('alert')).toHaveText('指定されたファイルが見つかりません。');
-  await expect(page.getByRole('button', { name: '印刷を開始', exact: true })).toBeDisabled();
+  await expect(page.getByRole('alert')).toHaveText('ファイルが見つかりません。');
+  await expect(page.getByRole('button', { name: '印刷', exact: true })).toBeDisabled();
+});
+test('keeps an unknown print outcome distinct and disables further requests', async ({ page }) => {
+  let prints = 0;
+  await page.route('**/preview/*/*', (route) => {
+    const path = new URL(route.request().url()).pathname;
+    if (path.endsWith('/gcode')) return route.fulfill({ contentType: 'text/plain', body: GCODE });
+    if (path.endsWith('/print')) {
+      prints++;
+      return route.fulfill({
+        status: 504,
+        json: {
+          id: route.request().headers()['idempotency-key'],
+          state: 'unknown',
+          error: { code: 'printer_outcome_unknown', message: 'Print command outcome is unknown' },
+        },
+      });
+    }
+    return route.fulfill({
+      json: {
+        displayName: 'cube.stl',
+        printerEnabled: true,
+        file: {
+          id,
+          name: 'cube.gcode.3mf',
+          format: 'gcode.3mf',
+          state: 'ready',
+          estimatedSeconds: null,
+          filamentGrams: null,
+          filamentMillimeters: null,
+        },
+      },
+    });
+  });
+  await page.goto(`/preview/${id}`);
+  await expect(page.getByRole('button', { name: '印刷', exact: true })).toBeEnabled({
+    timeout: 20000,
+  });
+  page.once('dialog', (dialog) => dialog.accept());
+  await page.getByRole('button', { name: '印刷', exact: true }).click();
+  await expect(page.getByRole('button', { name: '結果不明', exact: true })).toBeDisabled();
+  await expect(page.getByRole('status')).toHaveText(
+    '結果が不明です。プリンターの画面を確認してください。',
+  );
+  expect(prints).toBe(1);
 });

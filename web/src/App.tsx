@@ -37,13 +37,13 @@ export function App() {
           throw new ApiError(
             response.status,
             body.error?.code ?? 'request_failed',
-            body.error?.message ?? '印刷要求に失敗しました。',
+            body.error?.message ?? '印刷できませんでした。',
           );
         },
         setPrintState,
         () =>
           window.confirm(
-            '表示中のファイルをA1 miniで印刷します。ベッドが空で、材料とプレートが適切であることを確認してください。プリンターの加熱・動作を開始します。続行しますか？',
+            '印刷しますか？\nベッドが空で、材料とプレートが合っていることを確認してください。',
           ),
       ),
     [],
@@ -66,7 +66,7 @@ export function App() {
         setFile(metadata);
         setDisplayName(data.displayName);
         if (metadata.state !== 'ready' || !['gcode', 'gcode.3mf'].includes(metadata.format))
-          throw new Error('保存済みのスライス結果UUIDを指定してください。');
+          throw new Error('このファイルはプレビューできません。');
         setPrinterEnabled(data.printerEnabled === true);
         const response = await fetchPreview(`/preview/${uuid}/gcode`, {
           signal: abort.signal,
@@ -107,7 +107,7 @@ export function App() {
         <span className="header-tag">プレビュー</span>
         <div className="connection">
           <span className={printerEnabled ? 'dot active' : 'dot'} />
-          {printerEnabled ? '印刷できます' : 'プリンター未設定'}
+          {printerEnabled ? 'プリンター設定済み' : 'プリンター未設定'}
         </div>
       </header>
       <main className="workspace">
@@ -116,7 +116,7 @@ export function App() {
             <Suspense
               fallback={
                 <div className="empty-view" role="status">
-                  3Dビューアーを読み込み中…
+                  読み込み中…
                 </div>
               }
             >
@@ -125,14 +125,13 @@ export function App() {
           ) : (
             <div className="empty-view">
               <span className="empty-icon">◈</span>
-              <h1>印刷前に、ツールパスを確認。</h1>
-              <p>A1 miniのスライス結果を3Dで表示します。</p>
+              <h1>プレビュー</h1>
               {!validUuid ? (
                 <p className="error" role="alert">
-                  /preview/ファイルUUID のURLで開いてください。
+                  プレビューのURLを確認してください。
                 </p>
               ) : loading ? (
-                <p role="status">スライス結果を取得しています…</p>
+                <p role="status">読み込み中…</p>
               ) : (
                 <p className="error" role="alert">
                   {error}
@@ -147,16 +146,15 @@ export function App() {
           )}
         </div>
         <aside className="sidebar">
-          <div className="eyebrow">スライス結果</div>
-          <h2>{displayName || '読み込み中…'}</h2>
-          <span className="format-tag">{file?.format.toUpperCase() ?? 'GCODE / 3MF'}</span>
+          <h2>{displayName || (loading ? '読み込み中…' : '—')}</h2>
+          {file && <span className="format-tag">{file.format.toUpperCase()}</span>}
           <div className="stats">
             <div>
-              <span>推定造形時間</span>
+              <span>推定時間</span>
               <strong>{duration(file?.estimatedSeconds ?? null)}</strong>
             </div>
             <div>
-              <span>フィラメント使用量</span>
+              <span>フィラメント</span>
               <strong>
                 {file?.filamentGrams != null ? `${file.filamentGrams.toFixed(1)} g` : '未取得'}
               </strong>
@@ -168,12 +166,11 @@ export function App() {
             </div>
           </div>
           <div className="machine-card">
-            <span>出力先</span>
+            <span>プリンター</span>
             <strong>Bambu Lab A1 mini</strong>
             <small>0.4 mm ノズル · 180 mm プレート</small>
           </div>
           <div className="print-panel">
-            <p>印刷開始時にファイルを転送します。材料とベッドを確認してください。</p>
             <button
               className="print-button"
               disabled={
@@ -186,14 +183,15 @@ export function App() {
               onClick={() => void controller.start(uuid)}
             >
               {printState.busy
-                ? '転送・要求中…'
+                ? '送信中…'
                 : printState.operation?.state === 'accepted'
-                  ? '開始要求を受付済み'
-                  : printState.key
-                    ? '同じ操作の結果を再確認'
-                    : '印刷を開始'}
+                  ? '受付済み'
+                  : printState.operation?.state === 'unknown'
+                    ? '結果不明'
+                    : printState.key
+                      ? '結果を確認'
+                      : '印刷'}
             </button>
-            {!printerEnabled && <small>プリンターの接続設定後に印刷できます。</small>}
             {printState.message && (
               <p
                 className={`print-message ${printState.operation?.state === 'accepted' ? 'success' : ''}`}
@@ -202,18 +200,14 @@ export function App() {
                 {printState.message}
               </p>
             )}
-            {printState.key && <small className="operation-id">操作ID: {printState.key}</small>}
           </div>
           {file && (
             <button className="secondary" onClick={() => void download()}>
-              印刷ファイルを保存 ↓
+              ダウンロード
             </button>
           )}
         </aside>
       </main>
-      <footer>
-        LAN内で処理・保存 <span>プレビュー操作ではプリンターは動きません</span>
-      </footer>
     </div>
   );
 }
