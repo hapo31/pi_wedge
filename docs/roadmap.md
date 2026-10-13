@@ -24,3 +24,7 @@
 ## フェーズ0検証結果
 
 2026-10-13 aarch64 / Node24.21.0 / SeaweedFS4.48。Hono実HTTP health/Swagger（ローカルJS資産）/OpenAPI3.1を取得。/var/lib/pi_wedge→/data bind mountでS3書込後、コンテナforce-recreateして同じUUIDを読取り・一致確認・削除。型/初期APIテスト/サーバーとUIビルド成功。
+
+## フェーズ1ソフトウェア検証
+
+UUID、staging復旧、永続SQLite、ストレージ障害、キュー/同時実行/再起動、STEP→Slicer契約、入力/サイズ/認証、JSON/multipart、OpenAPI、副作用分離、印刷冪等性、FTPS/MQTT TLS/ACK/timeoutを30自動テストで確認。CLI runnerは実子プロセス、Orca/FreeCADアダプターとプリンターはモック。SeaweedFSでS3アダプターput/head/get/delete、公式v2.4.2プロファイル継承解決を実行確認。実機を使用した転送/印刷は未検証。

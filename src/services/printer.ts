@@ -1,0 +1,160 @@
+import { mkdtemp, mkdir, rm } from 'node:fs/promises';
+import { join, resolve } from 'node:path';
+import type { Printer } from '../domain/contracts.js';
+import type { PrintOptions, PrintOperation } from '../domain/schemas.js';
+import { Uuid } from '../domain/schemas.js';
+import { AppError, safeError, logError } from '../domain/errors.js';
+import { FileService } from './files.js';
+export class PrinterService {
+  private busy = false;
+  constructor(
+    private files: FileService,
+    private printer: Printer,
+    private dataDir: string,
+  ) {}
+  private file(id: string) {
+    const file = this.files.ready(id);
+    if (file.format !== 'gcode.3mf' || !file.sourceModelId)
+      throw new AppError(
+        'wrong_kind',
+        'A1 mini printing requires a server-generated gcode.3mf UUID',
+        409,
+      );
+    return file;
+  }
+  private async withFile<T>(id: string, fn: (path: string) => Promise<T>) {
+    const root = resolve(this.dataDir, 'printer-tmp');
+    await mkdir(root, { recursive: true });
+    const dir = await mkdtemp(join(root, 'transfer-'));
+    try {
+      const path = join(dir, 'artifact.gcode.3mf');
+      await this.files.materialize(id, path);
+      return await fn(path);
+    } finally {
+      await rm(dir, { recursive: true, force: true }).catch((e) =>
+        logError('printer_cleanup', id, e),
+      );
+    }
+  }
+  async upload(fileId: string) {
+    const file = this.file(fileId);
+    if (this.busy)
+      throw new AppError('printer_busy', 'Another printer operation is in progress', 409);
+    this.busy = true;
+    try {
+      return {
+        fileId,
+        ...(await this.withFile(fileId, (path) => this.printer.upload(file, path))),
+      };
+    } finally {
+      this.busy = false;
+    }
+  }
+  get(id: string) {
+    const op = this.files.repository.get('operation', Uuid.parse(id));
+    if (!op) throw new AppError('operation_not_found', 'Print operation UUID does not exist', 404);
+    return op;
+  }
+  async print(fileId: string, options: PrintOptions, key: string): Promise<PrintOperation> {
+    Uuid.parse(key);
+    const existing = this.files.repository.get('operation', key);
+    if (existing) {
+      if (
+        existing.fileId !== fileId ||
+        JSON.stringify(existing.options) !== JSON.stringify(options)
+      )
+        throw new AppError(
+          'idempotency_conflict',
+          'This Idempotency-Key was used for a different request',
+          409,
+        );
+      return existing;
+    }
+    const file = this.file(fileId);
+    if (this.busy)
+      throw new AppError('printer_busy', 'Another printer operation is in progress', 409);
+    if (
+      this.files.repository
+        .all('operation')
+        .some((o) => o.state === 'unknown' || o.state === 'pending')
+    )
+      throw new AppError(
+        'printer_outcome_unknown',
+        'An earlier print operation has an unknown outcome. Resolve it before another print.',
+        409,
+      );
+    this.busy = true;
+    const operation: PrintOperation = {
+      id: key,
+      fileId,
+      options,
+      state: 'pending',
+      createdAt: new Date().toISOString(),
+      error: null,
+    };
+    this.files.repository.insert('operation', operation);
+    let dispatched = false;
+    try {
+      await this.withFile(fileId, async (path) => {
+        const { remotePath } = await this.printer.upload(file, path);
+        dispatched = true;
+        await this.printer.startPrint(remotePath, options, key);
+      });
+      operation.state = 'accepted';
+    } catch (error) {
+      operation.state =
+        (error instanceof AppError && error.code === 'printer_outcome_unknown') ||
+        (dispatched && !(error instanceof AppError))
+          ? 'unknown'
+          : 'failed';
+      operation.error =
+        operation.state === 'unknown'
+          ? {
+              code: 'printer_outcome_unknown',
+              message: 'Print command outcome is unknown. Check the printer before retrying.',
+            }
+          : safeError(error);
+      logError('printer', key, error);
+    } finally {
+      this.files.repository.save('operation', operation);
+      this.busy = false;
+    }
+    return operation;
+  }
+  resolveUnknown(id: string, outcome: 'accepted' | 'failed', note: string) {
+    const op = this.get(id);
+    if (op.state !== 'unknown')
+      throw new AppError('operation_not_unknown', 'Only an unknown operation can be resolved', 409);
+    op.state = outcome;
+    op.error =
+      outcome === 'failed'
+        ? { code: 'manually_resolved', message: 'Administrator confirmed print did not start' }
+        : null;
+    this.files.repository.save('operation', op);
+    console.info(
+      JSON.stringify({
+        event: 'print_outcome_resolved',
+        operationId: id,
+        outcome,
+        noteLength: note.length,
+      }),
+    );
+    return op;
+  }
+  async recover() {
+    await rm(resolve(this.dataDir, 'printer-tmp'), { recursive: true, force: true });
+    for (const operation of this.files.repository
+      .all('operation')
+      .filter((o) => o.state === 'pending')) {
+      operation.state = 'unknown';
+      operation.error = {
+        code: 'printer_outcome_unknown',
+        message: 'Server stopped during print dispatch. Check the printer before retrying.',
+      };
+      this.files.repository.save('operation', operation);
+    }
+  }
+  async stop() {
+    while (this.busy) await new Promise((resolve) => setTimeout(resolve, 50));
+  }
+}

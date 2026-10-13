@@ -27,5 +27,5 @@ Orca/FreeCAD導入と`npm run profiles:prepare`は[スライサー手順](docs/s
 
 ## 状態
 
-フェーズ0: 実装・検証済み（ARM64、実HTTP、SeaweedFS S3とコンテナ再作成後の永続化）。フェーズ1/2: 計画済み。実機互換性は未検証。
+フェーズ0: 実装・検証済み（ARM64、実HTTP、SeaweedFS S3とコンテナ再作成後の永続化）。フェーズ1: コード・自動テスト実装済み（S3アダプター実接続、30テスト）。フェーズ2: 計画済み。実Orca/FreeCADスライスとA1 mini実機互換性は未検証。
 設計: [concept](docs/concept.md)、[architecture](docs/architecture.md)、[API](docs/api-design.md)、[storage](docs/storage.md)、[preview](docs/preview.md)、[roadmap](docs/roadmap.md)。開発規約は[AGENTS.md](AGENTS.md)。

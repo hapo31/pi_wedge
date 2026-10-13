@@ -17,3 +17,5 @@ PRINTER_ENABLED=falseが既定。enabled時host/serial/access codeが必須。�
 3. ベッドを空にして材料/プレートを確認し、明示的print APIを一度実行。ftp:///UUID.gcode.3mf、Metadata/plate_1.gcode、sequence_id ACK、実際の開始を記録。形式/パスが不一致ならアダプターのみ調整する。
 4. 同一キー再送で2回目の開始がないこと、別内容409、通信断時unknown、再起動後も同一キーで再送しないことを確認。
 5. bedLeveling/AMS mappingは個別に確認。mockの成功を上記の成功と記載しない。
+
+結果不明の操作が残る場合は新しいキーの印刷も409で止める。実機画面・ベッドを確認した後のみ `POST /api/printer/operations/{operationId}/resolve` に `outcome`（accepted/failed）と `inspectionNote` を送信して解決する。このAPI自体は機器を動かさない。
