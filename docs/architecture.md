@@ -3,6 +3,8 @@
 ```mermaid
 flowchart LR
   C[LAN client / AI] --> H[Hono + OpenAPI]
+  A[MCP client] --> X[/mcp Streamable HTTP/]
+  X --> H
   U[React preview] --> H
   H --> F[File service]
   H --> Q[Persisted slice queue]
@@ -18,7 +20,7 @@ flowchart LR
   B --> R[A1 mini]
 ```
 
-HTTP層→サービス→domain契約、adapterは契約を実装する。入力モデルの本体はS3、メタデータとキューはSQLite。キューは同じサーバープロセスで動くがHTTPハンドラーから独立し、Slicerの交換はDIで可能。将来MCPはサービスへの新しい入口として追加。
+HTTP層→サービス→domain契約、adapterは契約を実装する。入力モデルの本体はS3、メタデータとキューはSQLite。キューは同じサーバープロセスで動くがHTTPハンドラーから独立し、Slicerの交換はDIで可能。`/mcp` はBearer認証付きの案内専用MCP入口で、REST APIの仕様位置とUUIDプレビューの使い方をモデルへ伝える。ファイル・サービス層・プリンターの操作は行わない。
 
 HTTPサーバーは既定で `0.0.0.0:3000` に待ち受け、React/Swagger/APIを同じオリジンでLANクライアントへ配信する。mDNS名はホストOSのAvahi等が解決し、アプリにmDNS依存は追加しない。LANのIPv4または `ホスト名.local` から接続し、AI/管理用 `/api/*` はBearer認証、スマホの `/preview/*` はトークン入力なしで利用する。`HOST=127.0.0.1` でローカル限定に切替可能。SeaweedFSはloopback公開のままとする。
 

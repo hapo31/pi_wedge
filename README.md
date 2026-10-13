@@ -46,6 +46,8 @@ AIにモデル作成を依頼→AIが認証済みAPIでSTL/STEPをスライス�
 `/api/*` はAI/管理用のBearer認証を維持。`/preview/{uuid}` とその配下の読取・印刷操作は信頼するLAN向けで、指定UUIDのスライス結果だけを扱う。ブラウザ印刷は同一OriginのPOSTと永続的なIdempotency-Keyが必要。
 結果不明の印刷を自動再送しない。同じIdempotency-Keyで結果を参照し、実機確認後にresolve APIを使う。[API使用例](docs/api-design.md)を参照。
 
+MCPクライアントには `http://サーバーのLAN-IP:3000/mcp` をStreamable HTTPとして登録し、`Authorization: Bearer <API_TOKEN>` を設定する。MCPは用途とAPI/プレビューの使い方をモデルに伝える案内専用で、実際のアップロード・スライスはAPI、確認はブラウザのプレビューで行う。[MCP接続手順](docs/mcp.md)を参照。
+
 開発用UIは `npm run dev:web`。実ブラウザ検証はAPIサーバー起動後 `npx playwright install --with-deps chromium` と `npm run test:e2e`。ブラウザ試験は印刷APIをモックする。実スライス検証は `npm run test:slice -- model.stl model.step`（モデルと成果物を保存する）。同じDATA_DIRのサーバーを停止するか、検証専用DATA_DIRを指定して実行する。
 
 設計: [concept](docs/concept.md)、[architecture](docs/architecture.md)、[API](docs/api-design.md)、[storage](docs/storage.md)、[preview](docs/preview.md)、[roadmap](docs/roadmap.md)。開発規約は[AGENTS.md](AGENTS.md)。

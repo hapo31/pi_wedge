@@ -125,6 +125,118 @@ export function createApp(services?: Services & { ready?: boolean }) {
     }),
     (c) => c.json({ status: 'ok' as const }, 200),
   );
+  app.post('/mcp', async (c) => {
+    if (!services)
+      return c.json(
+        { error: { code: 'unavailable', message: 'Services are not configured' } },
+        503,
+      );
+    const supplied = Buffer.from(c.req.header('Authorization')?.match(/^Bearer (.+)$/i)?.[1] ?? ''),
+      expected = Buffer.from(services.config.API_TOKEN);
+    if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
+      return c.json(
+        { error: { code: 'unauthorized', message: 'A valid Bearer token is required' } },
+        401,
+      );
+    if (!c.req.header('content-type')?.toLowerCase().includes('application/json'))
+      return c.json(
+        {
+          error: {
+            code: 'unsupported_media_type',
+            message: 'MCP requests must use application/json',
+          },
+        },
+        415,
+      );
+    const accept = c.req.header('accept') ?? '';
+    if (!accept.includes('application/json') || !accept.includes('text/event-stream'))
+      return c.text('Accept must include application/json and text/event-stream', 406);
+    const origin = c.req.header('origin');
+    if (origin) {
+      try {
+        if (new URL(origin).origin !== new URL(c.req.url).origin)
+          return c.text('Origin does not match this server', 403);
+      } catch {
+        return c.text('Invalid Origin', 403);
+      }
+    }
+    let raw: unknown;
+    try {
+      raw = await c.req.json();
+    } catch {
+      return c.json(
+        { error: { code: 'invalid_json', message: 'Request body must be valid JSON' } },
+        400,
+      );
+    }
+    const request = z
+      .object({
+        jsonrpc: z.literal('2.0'),
+        id: z.union([z.string(), z.number(), z.null()]).optional(),
+        method: z.string(),
+        params: z.record(z.string(), z.unknown()).optional(),
+      })
+      .safeParse(raw);
+    if (!request.success)
+      return c.json(
+        { jsonrpc: '2.0', id: null, error: { code: -32600, message: 'Invalid Request' } },
+        400,
+      );
+    const { id, method, params } = request.data;
+    const supported = ['2025-11-25', '2025-06-18', '2025-03-26'];
+    if (method !== 'initialize') {
+      const protocolVersion = c.req.header('MCP-Protocol-Version');
+      if (!protocolVersion || !supported.includes(protocolVersion))
+        return c.text('Missing or unsupported MCP-Protocol-Version', 400);
+      c.header('MCP-Protocol-Version', protocolVersion);
+    }
+    if (id === undefined) return c.body(null, 202);
+    const response = (result: unknown) => c.json({ jsonrpc: '2.0' as const, id, result });
+    const rpcError = (code: number, message: string) =>
+      c.json({ jsonrpc: '2.0' as const, id, error: { code, message } });
+    if (method === 'initialize') {
+      const protocolVersion = params?.protocolVersion;
+      if (typeof protocolVersion !== 'string') return rpcError(-32602, 'Invalid initialize params');
+      return response({
+        protocolVersion: supported.includes(protocolVersion) ? protocolVersion : '2025-11-25',
+        capabilities: { tools: { listChanged: false } },
+        serverInfo: { name: 'pi_wedge', version: '0.1.0' },
+        instructions:
+          'pi_wedge slices STL/STEP models for a LAN-connected Bambu Lab A1 mini and lets the AI and user inspect the resulting 3D preview together in a browser. Read /openapi.json or /docs for the authenticated API. After a slice succeeds, give the user its /preview/{resultFileId} URL. This MCP server only explains the workflow; it does not slice, upload, or print models.',
+      });
+    }
+    if (method === 'notifications/initialized' || method === 'notifications/cancelled')
+      return c.body(null, 202);
+    if (method === 'ping') return response({});
+    if (method === 'tools/list')
+      return response({
+        tools: [
+          {
+            name: 'pi_wedge_workflow',
+            title: 'Inspect a 3D print model with pi_wedge',
+            description:
+              'Explains how to use this Raspberry Pi service to slice an STL/STEP file and open its UUID-based 3D preview so the AI and user can review it together. Does not perform any operation. Use the HTTP API described by /openapi.json for model upload and slicing; then share the preview URL. Printing is a separate, explicit physical action.',
+            inputSchema: { type: 'object', properties: {}, additionalProperties: false },
+          },
+        ],
+      });
+    if (method === 'tools/call') {
+      if (params?.name !== 'pi_wedge_workflow') return rpcError(-32602, 'Unknown tool');
+      return response({
+        content: [
+          {
+            type: 'text',
+            text: 'pi_wedge is a LAN service for slicing STL/STEP models for a Bambu Lab A1 mini and reviewing the result in a browser. Read /docs or /openapi.json for the API. Use authenticated POST /api/files and POST /api/slices APIs, then poll GET /api/slices/{jobId} until succeeded. Share /preview/{resultFileId} with the user so you can review the 3D result together. Resolve these paths against the configured pi_wedge server URL. This tool only provides guidance; it does not access files, slice, or print. Printing requires a separate explicit action.',
+          },
+        ],
+      });
+    }
+    return rpcError(-32601, 'Method not found');
+  });
+  app.all('/mcp', (c) => {
+    c.header('Allow', 'POST');
+    return c.text('Method not allowed', 405);
+  });
   app.use('/api/*', async (c, next) => {
     if (!services) throw new AppError('unavailable', 'Services are not configured', 503);
     const supplied = Buffer.from(c.req.header('Authorization')?.match(/^Bearer (.+)$/i)?.[1] ?? ''),
@@ -568,7 +680,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
     type: 'http',
     scheme: 'bearer',
     description:
-      'Administrator API_TOKEN. Required for /api/* agent and administration operations. The trusted LAN browser preview uses /preview/* without token entry.',
+      'Administrator API_TOKEN. Required for /api/* agent and administration operations and POST /mcp. The trusted LAN browser preview uses /preview/* without token entry.',
   });
   const documentConfig = {
     openapi: '3.1.0',

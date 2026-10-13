@@ -22,8 +22,11 @@ OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はロー
 | GET /preview/{uuid}/gcode                          | UUID                                                          | 200 text/plain                 | 指定スライスのG-code抽出のみ                          |
 | GET /preview/{uuid}/download                       | UUID                                                          | 200 binary                     | 指定スライスの保存済み本体だけ                        |
 | POST /preview/{uuid}/print                         | UUID、Origin、Idempotency-Key、空の本体                       | 200 操作結果                   | 確認済みブラウザ操作、転送・加熱・造形開始            |
+| POST /mcp                                          | MCP JSON-RPC、Bearer                                          | MCP初期化・用途案内            | 案内のみ。ファイル・API・プリンターへアクセスしない   |
 
 ブラウザ用 `/preview/*` は信頼するLAN内でトークン入力なし。公開範囲は指定UUIDのreadyスライス結果のみ。印刷はOriginが要求URLのoriginと一致することを検証し、Originなし/不一致は403、本文付きは400（1KiB超は413）。ブラウザが自動送信するOriginとクライアント側で保持するIdempotency-Keyを使用する。CORSを許可せず、AI用API_TOKENをUI・URLへ渡さない。
+
+`POST /mcp` は Streamable HTTP のJSON-RPC入口で、Bearer認証が必要。`pi_wedge_workflow` ツールがサービスの用途、`/docs`・`/openapi.json`、完了したスライスを開く `/preview/{resultFileId}` を案内するだけで、モデルのアップロード・スライス・印刷は実行しない。接続手順とツールの想定利用は [MCPガイド](mcp.md) を参照。
 
 主なエラー: 400 schema/invalid_file、401 unauthorized、403 forbidden_origin、404 file/job/operation不存在、409 not_ready/wrong_kind/queue_full/idempotency_conflict/printer_busy、413 too_large、415 unsupported_format、422 invalid_gcode/archive、502 printer_error、503 dependency_unavailable、504 printer_outcome_unknown。詳細は各OpenAPI応答に記述。
 
