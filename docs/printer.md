@@ -19,3 +19,23 @@ AI/管理用の印刷APIはBearer + Idempotency-Key必須。LANのブラウザ�
 5. bedLeveling/AMS mappingは個別に確認。mockの成功を上記の成功と記載しない。
 
 結果不明の操作が残る場合は新しいキーの印刷も409で止める。実機画面・ベッドを確認した後のみ `POST /api/printer/operations/{operationId}/resolve` に `outcome`（accepted/failed）と `inspectionNote` を送信して解決する。このAPI自体は機器を動かさない。
+
+## MQTT診断ログ
+
+印刷操作中のMQTT要求・応答はJSONで標準出力へ記録する。`printer_mqtt_request` / `printer_mqtt_response` / `printer_mqtt_published` / `printer_mqtt_exchange_completed` / `printer_mqtt_exchange_failed` を操作UUID・要求sequence_id・時刻・経過時間で照合する。publishedはブローカーへの送信完了であり、プリンターの受付ACKではない。
+
+応答ログは照合されなかったものも含め、command・sequence_id・result・reason・err_code・gcode_state・print_errorなどの許可フィールドに限定する。1回の交換で先頭32応答と照合できた応答を記録し、終了ログには応答総数を残す。文字列は256文字まで、受信は64KiBまで。接続資格情報・deviceトピック・全テレメトリ・任意のネストを記録せず、設定済みの秘密とURL認証情報を伏せる。
+
+印刷ACKは同一sequence_idで照合する。commandがある場合はproject_fileに一致させ、省略されている場合はresultまたは数値err_codeを持つ応答だけを対象にする。resultは大文字小文字を区別せず、非ゼロerr_codeは拒否として扱う。単なる状態通知を受付ACKにはしない。実機応答を取得するまで、command省略が今回の結果不明の原因だったとは断定しない。
+
+2026-10-14の実機試行ではcommandがproject_file、result省略、err_code 84033543の応答を取得した。FTPS・MQTTの接続は成功したが、印刷開始要求は拒否された。[通信ライブラリ作者のエラー表](https://github.com/Aptimex/bambu-mqtt-generator/blob/main/README.md)はこのコードを署名不足として説明する。LANアクセスコードによる接続認証とコマンドの署名認証は別である。公式のLAN Only / Developer Modeを実機で確認してから、明示的な印刷APIを新しいキーで一度実行する。今回の詳細は[verification.md](verification.md)を参照。
+
+同日、ユーザーがDeveloper Modeを有効にした後の再試行は、印刷APIでHTTP 200 / accepted、MQTT ACKでresult successを確認した。ユーザー指示による停止は、停止REST APIが未実装のため診断用の固定print.stopをMQTTで一度だけ送信した。停止ACK successとRUNNING→FAILEDの状態遷移を確認。開始要求はREST経由、停止は直接MQTTであり、停止APIや造形完了の検証結果ではない。
+
+## 停止API
+
+`POST /api/printer/stop`へBearer・Idempotency-Key(UUID)・JSON `{}`を送る。PrinterServiceが停止操作をSQLiteのstopOperationレコードへpendingで登録し、Printer.stopPrintを呼ぶ。アダプターはFTPS転送やidle判定をせず、購読後に固定のprint.stop / param空文字を一度publishする。開始と同じTLS・ACK照合・ログ・タイムアウト処理を使う。
+
+停止操作はaction stop、状態pending/accepted/failed/unknown。acceptedは要求受付であり、終了動作や機構の停止完了は別途実機で確認する。キーを再使用しても送信せず、既存結果を返す。開始用キーの再利用は409。GET `/api/printer/operations/{operationId}`で照会し、unknownは実機を確認した管理者が既存resolve APIで解決する。停止操作のfailed解決は「停止要求が受付されなかった」、accepted解決は「停止が受付された」の確認を表す。
+
+結果不明の開始が残っていても停止は要求できるが、通信中の同時操作は409。停止後も開始の不確定履歴は残す。結果不明の停止は新しいキーで再送せず、新規開始も止める。再起動時のpending停止はunknownへ復旧し、再送しない。停止APIはモックで検証し、実機での停止ACK確認済みという記録は前節の診断スクリプトによるものと区別する。

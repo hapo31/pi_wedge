@@ -29,4 +29,5 @@ export interface ModelConverter {
 export interface Printer {
   upload(file: FileMetadata, path: string): Promise<{ remotePath: string }>;
   startPrint(remotePath: string, options: PrintOptions, operationId: string): Promise<void>;
+  stopPrint(operationId: string): Promise<void>;
 }

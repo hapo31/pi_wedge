@@ -1,7 +1,7 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Printer } from '../domain/contracts.js';
-import type { PrintOptions, PrintOperation } from '../domain/schemas.js';
+import type { PrintOptions, PrintOperation, StopPrintOperation } from '../domain/schemas.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
 import { FileService } from './files.js';
@@ -51,12 +51,31 @@ export class PrinterService {
     }
   }
   get(id: string) {
-    const op = this.files.repository.get('operation', Uuid.parse(id));
+    const uuid = Uuid.parse(id);
+    const op =
+      this.files.repository.get('operation', uuid) ??
+      this.files.repository.get('stopOperation', uuid);
     if (!op) throw new AppError('operation_not_found', 'Print operation UUID does not exist', 404);
     return op;
   }
+  private operations() {
+    return [
+      ...this.files.repository.all('operation'),
+      ...this.files.repository.all('stopOperation'),
+    ];
+  }
+  private saveOperation(op: PrintOperation | StopPrintOperation) {
+    if ('action' in op) this.files.repository.save('stopOperation', op);
+    else this.files.repository.save('operation', op);
+  }
   async print(fileId: string, options: PrintOptions, key: string): Promise<PrintOperation> {
     Uuid.parse(key);
+    if (this.files.repository.get('stopOperation', key))
+      throw new AppError(
+        'idempotency_conflict',
+        'This Idempotency-Key was used for a stop request',
+        409,
+      );
     const existing = this.files.repository.get('operation', key);
     if (existing) {
       if (
@@ -73,11 +92,7 @@ export class PrinterService {
     const file = this.file(fileId);
     if (this.busy)
       throw new AppError('printer_busy', 'Another printer operation is in progress', 409);
-    if (
-      this.files.repository
-        .all('operation')
-        .some((o) => o.state === 'unknown' || o.state === 'pending')
-    )
+    if (this.operations().some((o) => o.state === 'unknown' || o.state === 'pending'))
       throw new AppError(
         'printer_outcome_unknown',
         'An earlier print operation has an unknown outcome. Resolve it before another print.',
@@ -121,6 +136,61 @@ export class PrinterService {
     }
     return operation;
   }
+  async stopPrint(key: string): Promise<StopPrintOperation> {
+    Uuid.parse(key);
+    if (this.files.repository.get('operation', key))
+      throw new AppError(
+        'idempotency_conflict',
+        'This Idempotency-Key was used for a print request',
+        409,
+      );
+    const existing = this.files.repository.get('stopOperation', key);
+    if (existing) return existing;
+    if (this.busy)
+      throw new AppError('printer_busy', 'Another printer operation is in progress', 409);
+    if (
+      this.files.repository
+        .all('stopOperation')
+        .some((o) => o.state === 'pending' || o.state === 'unknown')
+    )
+      throw new AppError(
+        'printer_outcome_unknown',
+        'An earlier stop operation has an unknown outcome. Resolve it before another stop.',
+        409,
+      );
+    // An unresolved start must not prevent an explicit stop. It remains unresolved
+    // afterwards: a stop ACK cannot establish whether that start was accepted.
+    const operation: StopPrintOperation = {
+      id: key,
+      action: 'stop',
+      state: 'pending',
+      createdAt: new Date().toISOString(),
+      error: null,
+    };
+    this.files.repository.insert('stopOperation', operation);
+    this.busy = true;
+    try {
+      await this.printer.stopPrint(key);
+      operation.state = 'accepted';
+    } catch (error) {
+      operation.state =
+        !(error instanceof AppError) || error.code === 'printer_outcome_unknown'
+          ? 'unknown'
+          : 'failed';
+      operation.error =
+        operation.state === 'unknown'
+          ? {
+              code: 'printer_outcome_unknown',
+              message: 'Stop command outcome is unknown. Check the printer before retrying.',
+            }
+          : safeError(error);
+      logError('printer_stop', key, error);
+    } finally {
+      this.saveOperation(operation);
+      this.busy = false;
+    }
+    return operation;
+  }
   resolveUnknown(id: string, outcome: 'accepted' | 'failed', note: string) {
     const op = this.get(id);
     if (op.state !== 'unknown')
@@ -128,9 +198,15 @@ export class PrinterService {
     op.state = outcome;
     op.error =
       outcome === 'failed'
-        ? { code: 'manually_resolved', message: 'Administrator confirmed print did not start' }
+        ? {
+            code: 'manually_resolved',
+            message:
+              'action' in op
+                ? 'Administrator confirmed stop was not accepted'
+                : 'Administrator confirmed print did not start',
+          }
         : null;
-    this.files.repository.save('operation', op);
+    this.saveOperation(op);
     console.info(
       JSON.stringify({
         event: 'print_outcome_resolved',
@@ -143,15 +219,14 @@ export class PrinterService {
   }
   async recover() {
     await rm(resolve(this.dataDir, 'printer-tmp'), { recursive: true, force: true });
-    for (const operation of this.files.repository
-      .all('operation')
-      .filter((o) => o.state === 'pending')) {
+    for (const operation of this.operations().filter((o) => o.state === 'pending')) {
       operation.state = 'unknown';
       operation.error = {
         code: 'printer_outcome_unknown',
-        message: 'Server stopped during print dispatch. Check the printer before retrying.',
+        message:
+          'Server stopped during printer command dispatch. Check the printer before retrying.',
       };
-      this.files.repository.save('operation', operation);
+      this.saveOperation(operation);
     }
   }
   async stop() {

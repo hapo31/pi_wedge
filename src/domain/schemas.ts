@@ -103,3 +103,17 @@ export const OperationSchema = z
   })
   .openapi('PrintOperation');
 export type PrintOperation = z.infer<typeof OperationSchema>;
+export const StopRequestSchema = z.object({}).strict().openapi('StopPrintRequest');
+export const StopOperationSchema = z
+  .object({
+    id: Uuid,
+    action: z.literal('stop'),
+    state: z.enum(['pending', 'accepted', 'failed', 'unknown']),
+    createdAt: z.string().datetime(),
+    error: ErrorInfo.nullable(),
+  })
+  .openapi('StopPrintOperation');
+export type StopPrintOperation = z.infer<typeof StopOperationSchema>;
+export const PrinterOperationSchema = z
+  .union([OperationSchema, StopOperationSchema])
+  .openapi('PrinterOperation');

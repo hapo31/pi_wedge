@@ -18,6 +18,9 @@ import {
   JobSchema,
   OperationSchema,
   PrintRequestSchema,
+  PrinterOperationSchema,
+  StopOperationSchema,
+  StopRequestSchema,
   SliceOptionsSchema,
   Uuid,
 } from './domain/schemas.js';
@@ -545,15 +548,75 @@ export function createApp(services?: Services & { ready?: boolean }) {
     );
     app.openapi(
       createRoute({
+        method: 'post',
+        path: '/api/printer/stop',
+        operationId: 'stopPrint',
+        security: secured,
+        summary: 'Explicitly stop the current physical print',
+        description:
+          'PHYSICAL SIDE EFFECT: requests cancellation of the current printer job; cleanup motion may continue. No file upload or print start. Bearer and a persistent Idempotency-Key UUID are required. Send an empty JSON object. pending → accepted/failed/unknown; accepted is a stop command ACK, not confirmation that all motion has stopped. Repeat the same key to read the stored result, never automatically resend with a new key. One printer command at a time. An unresolved start permits a stop once dispatch is idle, but remains unresolved. An unresolved stop blocks new stop and print keys until physical inspection and manual resolution.',
+        request: {
+          headers: z.object({ 'Idempotency-Key': Uuid }),
+          body: {
+            required: true,
+            content: { 'application/json': { schema: StopRequestSchema, example: {} } },
+          },
+        },
+        responses: {
+          200: json(
+            StopOperationSchema,
+            'Stop command accepted or previous pending/accepted result',
+            {
+              id: exampleId,
+              action: 'stop',
+              state: 'accepted',
+              createdAt: '2026-10-14T00:00:00.000Z',
+              error: null,
+            },
+          ),
+          502: json(StopOperationSchema, 'Stop failed before dispatch or was rejected'),
+          504: json(StopOperationSchema, 'Stop outcome unknown; inspect the physical printer'),
+          ...Object.fromEntries(
+            Object.entries(errors).filter(([code]) => !['502', '504'].includes(code)),
+          ),
+        },
+      }),
+      async (c) => {
+        if (
+          c.req.header('Content-Type')?.split(';')[0]?.trim().toLowerCase() !== 'application/json'
+        )
+          throw new AppError(
+            'invalid_request',
+            'Send an empty JSON object with Content-Type application/json',
+            400,
+          );
+        // Hono substitutes {} when content-type parsing is skipped. Require the
+        // actual request body so an absent or unsupported body cannot stop a job.
+        let body: unknown;
+        try {
+          body = await c.req.json();
+        } catch {
+          throw new HTTPException(400);
+        }
+        StopRequestSchema.parse(body);
+        const op = await printer.stopPrint(c.req.valid('header')['Idempotency-Key']);
+        return c.json(op, op.state === 'unknown' ? 504 : op.state === 'failed' ? 502 : 200);
+      },
+    );
+    app.openapi(
+      createRoute({
         method: 'get',
         path: '/api/printer/operations/{operationId}',
         operationId: 'getPrintOperation',
         security: secured,
-        summary: 'Read a persisted print dispatch result',
+        summary: 'Read a persisted print or stop dispatch result',
         description:
           'Read-only. No physical printer side effects. unknown/pending does not trigger a retry.',
         request: { params: z.object({ operationId: Uuid }) },
-        responses: { 200: json(OperationSchema, 'Persisted print operation'), ...errors },
+        responses: {
+          200: json(PrinterOperationSchema, 'Persisted print or stop operation'),
+          ...errors,
+        },
       }),
       (c) => c.json(printer.get(c.req.valid('param').operationId), 200),
     );
@@ -563,9 +626,9 @@ export function createApp(services?: Services & { ready?: boolean }) {
         path: '/api/printer/operations/{operationId}/resolve',
         operationId: 'resolvePrintOutcome',
         security: secured,
-        summary: 'Record a physically inspected unknown print outcome',
+        summary: 'Record a physically inspected unknown print or stop outcome',
         description:
-          'Administrator action after checking the actual printer. Updates local operation state only; does not contact or move the device. Resolving as failed permits a new explicit print with a new key. Never use this as automatic retry logic.',
+          'Administrator action after checking the actual printer. Updates a print or stop operation locally only; does not contact or move the device. Resolving the operation permits a new explicit request once no other unknown operations remain. Never use this as automatic retry logic.',
         request: {
           params: z.object({ operationId: Uuid }),
           body: {
@@ -586,7 +649,10 @@ export function createApp(services?: Services & { ready?: boolean }) {
             },
           },
         },
-        responses: { 200: json(OperationSchema, 'Unknown state manually resolved'), ...errors },
+        responses: {
+          200: json(PrinterOperationSchema, 'Unknown state manually resolved'),
+          ...errors,
+        },
       }),
       (c) => {
         const body = c.req.valid('json');

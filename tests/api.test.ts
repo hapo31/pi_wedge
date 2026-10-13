@@ -1,7 +1,13 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { setup, MODEL, TOKEN, requestJson } from './helpers.js';
-import { FileSchema, JobSchema, SliceOptionsSchema } from '../src/domain/schemas.js';
+import {
+  FileSchema,
+  JobSchema,
+  SliceOptionsSchema,
+  StopOperationSchema,
+} from '../src/domain/schemas.js';
+import { AppError } from '../src/domain/errors.js';
 const contexts: Array<Awaited<ReturnType<typeof setup>>> = [];
 afterEach(async () => {
   for (const c of contexts.splice(0)) await c.close();
@@ -147,6 +153,7 @@ describe('API validation and OpenAPI contract', () => {
       '/api/slices/{jobId}',
       '/api/printer/upload',
       '/api/printer/print',
+      '/api/printer/stop',
       '/api/printer/operations/{operationId}',
     ];
     for (const path of endpoints) {
@@ -172,6 +179,14 @@ describe('API validation and OpenAPI contract', () => {
     expect(spec.paths['/api/printer/print'].post.parameters).toContainEqual(
       expect.objectContaining({ in: 'header', name: 'Idempotency-Key', required: true }),
     );
+    expect(spec.paths['/api/printer/stop'].post.description).toContain('PHYSICAL SIDE EFFECT');
+    expect(spec.paths['/api/printer/stop'].post.parameters).toContainEqual(
+      expect.objectContaining({ in: 'header', name: 'Idempotency-Key', required: true }),
+    );
+    expect(
+      spec.paths['/api/printer/stop'].post.requestBody.content['application/json'].schema,
+    ).toEqual({ $ref: '#/components/schemas/StopPrintRequest' });
+    expect(spec.components.schemas.StopPrintRequest.additionalProperties).toBe(false);
   });
   it('starts printing via the authenticated agent API and exposes persisted operation', async () => {
     const c = await ctx(),
@@ -192,5 +207,63 @@ describe('API validation and OpenAPI contract', () => {
         })
       ).status,
     ).toBe(200);
+  });
+  it('requires auth and strict input for stop, persists results and never uploads or starts', async () => {
+    const c = await ctx(),
+      key = randomUUID();
+    expect((await c.app.request('/api/printer/stop', { method: 'POST' })).status).toBe(401);
+    for (const request of [
+      requestJson('POST', {}),
+      requestJson('POST', {}, 'invalid'),
+      requestJson('POST', { command: 'start' }, key),
+      requestJson('POST', [], key),
+      { method: 'POST', headers: { Authorization: `Bearer ${TOKEN}`, 'Idempotency-Key': key } },
+    ])
+      expect((await c.app.request('/api/printer/stop', request)).status).toBe(400);
+    const response = await c.app.request('/api/printer/stop', requestJson('POST', {}, key));
+    expect(response.status).toBe(200);
+    const op = StopOperationSchema.parse(await response.json());
+    expect(op).toMatchObject({ id: key, action: 'stop', state: 'accepted', error: null });
+    await c.app.request('/api/printer/stop', requestJson('POST', {}, key));
+    expect(c.adapter.stopPrint).toHaveBeenCalledOnce();
+    expect(c.adapter.startPrint).not.toHaveBeenCalled();
+    expect(c.adapter.upload).not.toHaveBeenCalled();
+    const read = await c.app.request(`/api/printer/operations/${key}`, {
+      headers: { Authorization: `Bearer ${TOKEN}` },
+    });
+    expect(await read.json()).toEqual(op);
+  });
+  it('returns stop rejection/unknown states and resolves inspected stop outcomes without resending', async () => {
+    const c = await ctx(),
+      rejectedKey = randomUUID(),
+      unknownKey = randomUUID();
+    vi.mocked(c.adapter.stopPrint).mockRejectedValueOnce(
+      new AppError('printer_rejected', 'Stop rejected', 502),
+    );
+    const rejected = await c.app.request('/api/printer/stop', requestJson('POST', {}, rejectedKey));
+    expect(rejected.status).toBe(502);
+    expect(StopOperationSchema.parse(await rejected.json()).state).toBe('failed');
+    vi.mocked(c.adapter.stopPrint).mockRejectedValueOnce(
+      new AppError('printer_outcome_unknown', 'Stop ACK lost', 504),
+    );
+    const unknown = await c.app.request('/api/printer/stop', requestJson('POST', {}, unknownKey));
+    expect(unknown.status).toBe(504);
+    expect(StopOperationSchema.parse(await unknown.json()).state).toBe('unknown');
+    expect(
+      (await c.app.request('/api/printer/stop', requestJson('POST', {}, unknownKey))).status,
+    ).toBe(504);
+    expect(
+      (await c.app.request('/api/printer/stop', requestJson('POST', {}, randomUUID()))).status,
+    ).toBe(409);
+    const resolve = await c.app.request(
+      `/api/printer/operations/${unknownKey}/resolve`,
+      requestJson('POST', {
+        outcome: 'accepted',
+        inspectionNote: 'Checked printer screen: stopped.',
+      }),
+    );
+    expect(resolve.status).toBe(200);
+    expect(StopOperationSchema.parse(await resolve.json()).state).toBe('accepted');
+    expect(c.adapter.stopPrint).toHaveBeenCalledTimes(2);
   });
 });

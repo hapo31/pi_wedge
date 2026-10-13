@@ -1,11 +1,17 @@
 import { DatabaseSync } from 'node:sqlite';
 import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
-import type { FileMetadata, PrintOperation, SliceJob } from '../domain/schemas.js';
+import type {
+  FileMetadata,
+  PrintOperation,
+  SliceJob,
+  StopPrintOperation,
+} from '../domain/schemas.js';
 type Records = {
   file: FileMetadata;
   job: SliceJob & { reservedResultId: string };
   operation: PrintOperation;
+  stopOperation: StopPrintOperation;
 };
 export class Repository {
   readonly db: DatabaseSync;

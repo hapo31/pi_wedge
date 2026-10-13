@@ -1,4 +1,4 @@
-# 検証記録（2026-10-13）
+# 検証記録（2026-10-14）
 
 ## 実行環境と結果
 
@@ -9,16 +9,16 @@
 | Hono/Swagger/OpenAPI   | 実HTTP、ローカルSwagger JS/CSS                                       | 成功                                                                            |
 | SeaweedFS 4.48         | ARM64 Compose、/var/lib/pi_wedge→/data、S3書込→force-recreate→再読取 | データ一致                                                                      |
 | S3Storage              | 実SeaweedFSでput/head/get/delete                                     | 成功                                                                            |
-| API/サービス           | Vitest、CLI runnerは実子プロセス、プリンターはモック                 | 最終43テスト成功（CLI/所有権/サービス/API/プレビュー）                          |
+| API/サービス           | Vitest、CLI runnerは実子プロセス、プリンターはモック                 | 最終57テスト成功（停止API・冪等性・復旧・CLI/所有権/サービス/API/プレビュー）   |
 | Orca2.4.2 + FreeCAD1.0 | ARM64 Debian13コンテナ、ネットワーク無効                             | 実ツールで成功                                                                  |
 | STL20mm cube           | 非同期ジョブ→Orca→S3保存→UUID→preview text                           | succeeded、約71KBのgcode.3mf、約466KB G-code                                    |
 | STEP20mm cube          | FreeCAD→STL→同じスライサー/保存経路                                  | succeeded、3.62g / 1213.85mm、総推定1356秒                                      |
 | インチSTEP             | 0.7874015748inchをCONVERSION_BASED_UNITで宣言                        | 変換ログ19.9999999999962mm、スライス成功                                        |
 | 2ソリッドSTEP          | 独立BREP2個、2個目のX位置30mm                                        | 2solids/24triangles、全幅50mm、スライス成功                                     |
 | ブラウザ               | ARM64 Chromium156/Playwright1.64、実WebGL、API fixture               | レイヤー・travel・統計・回転/zoom・確認取消・1回送信・404・390px幅、2テスト成功 |
-| A1 mini FTPS/MQTT      | モックのみ                                                           | 実機未検証                                                                      |
+| A1 mini FTPS/MQTT      | モック・実FTPS転送とサイズ照合・印刷APIの実MQTT（2026-10-14）        | Developer Mode有効後に受付・RUNNING・停止確認。造形完了と品質は未検証           |
 
-ブラウザの印刷APIはfixtureで置換した。物理印刷は一度も開始していない。実スライスの.gcode.3mfは生成・ZIP/G-code構造を検証したが、A1 miniで印刷可能なことを確認した結果ではない。
+2026-10-13のブラウザ検証では印刷APIをfixtureで置換し、物理印刷を開始していない。2026-10-14の実機試行ではRESTからの印刷受付・RUNNING状態・明示的停止を確認したが、造形完了と品質は未検証。実スライスの.gcode.3mfは生成・ZIP/G-code構造を検証済み。
 
 ## 実ツールで判明した修正
 
@@ -84,3 +84,52 @@ HTTPの既定とローカル `.env` を `HOST=0.0.0.0` に変更し、標準サ�
 - `npm run test:e2e`: ARM64 Chromiumで3テスト成功。レイヤー・統計・確認取消時0送信・確認後1送信・受付済み・404・結果不明時の操作無効・390px幅を確認した。デスクトップとモバイルの画像も確認した。
 - サーバーは専用一時DATA_DIR・localストレージ・プリンター無効で127.0.0.1:3100に起動した。印刷APIはfixtureで置換し、物理印刷は開始していない。
 - 導入済みブラウザは `/tmp/pi-wedge-browsers` を指定。不足ライブラリを `/tmp/pi-wedge-copy-browser-deps` に展開し、LD_LIBRARY_PATHで参照した。OSへのライブラリ導入はしていない。既存test-resultsの所有権による書込み失敗を避け、`--output=/tmp/pi-wedge-copy-playwright-results` で結果・画像を保存した。
+
+## MQTT診断と印刷APIによる実機試行（2026-10-14）
+
+ユーザーが前回の操作`828ecc76-0ad7-4d5b-95ef-316911099e65`について「開始していない」と確認したため、管理APIのresolveでfailed / manually_resolvedへ更新した。その後、ユーザーの明示指示でMQTT診断ログ・command省略ACK・result大小文字・非ゼロerr_codeの拒否判定を実装した。秘密・全テレメトリをログへ出さず、文字列と応答数を制限する。モックで回帰検証し、実機結果とは区別する。
+
+稼働していたnpm startのプロセスを正常終了し、ビルド済みコードをsystemdユーザーサービス`pi-wedge.service`として起動した。旧PID名前空間の所有者PID20がSQLiteに残って起動を妨げたため、旧サーバーの停止と、現在のPID20が無関係のカーネルスレッドであることを確認し、その所有者記録だけを除いた。サービスactive、GET /health 200を確認。OS再起動後の自動起動設定はこの一時ユニットには含まれない。
+
+`POST /api/printer/print`へBearer認証・新しい永続Idempotency-Keyで一度だけ送信した。直接MQTTによる印刷開始や、自動再送は行っていない。
+
+- 印刷操作UUID: `fcabcdab-87d7-4865-9b00-be8b43f81d19`
+- ファイルUUID: `c4435680-29b2-459f-a9ad-44a8b45d2d95`（figure_tail_stand.stlのスライス、740,418bytes）
+- オプション: plate 1、ベッドレベリングあり、AMSなし、flow/vibration/timelapseなし。前回と同じ。
+- 実FTPS転送とリモートサイズ照合成功。その後MQTT TLS接続・report購読・pushall応答でIDLE / print_error 0を取得。
+- 2026-10-14 00:16:50 JSTにproject_fileを送信。約13ms後に同じsequence_id `264944858`の応答を受信した。commandはproject_file、resultは省略、err_codeは`84033543`（`0x05024007`）。
+- HTTP 502、操作はfailed / printer_rejectedで永続化。acceptedではなく、造形開始・完了は確認していない。
+
+この実応答は、旧実装ではresultがないためunknownになる形式だった。前回の応答は記録されていないため、前回も同じエラーだったとは断定しない。今回のコードは非ゼロerr_codeを拒否と判定する。
+
+[通信ライブラリ作者のエラー表](https://github.com/Aptimex/bambu-mqtt-generator/blob/main/README.md)では84033543は署名が必要な要求に署名がないことを示す。[Bambu公式方針](https://blog.bambulab.com/updates-and-third-party-integration-with-bambu-connect/)はLAN OnlyのDeveloper Modeを第三者MQTT制御の選択肢として説明している。実機側のLAN Only / Developer Mode設定確認が次の手順。署名の回避実装は追加しない。
+
+要求・応答の診断は`journalctl _SYSTEMD_USER_UNIT=pi-wedge.service -o cat`で操作UUIDを照合する。API試行結果とMQTTログの控えは`.data/printer-diagnostics/`（Git管理外）に保存。自動検証はnpm run check（型・Lint・Format・50テスト・サーバー/UIビルド）。サンドボックス内の既存CLI子プロセステスト2件の失敗は通常環境での実行で解消した。TLSの既存テスト期待値もserial照合関数を含む現行実装へ合わせた。ブラウザのコードとCLI処理は変更していない。
+
+## Developer Mode有効後の受付成功と停止（2026-10-14）
+
+ユーザーが実機のDeveloper Modeを有効にしたと通知した後、同じファイルとオプションを`POST /api/printer/print`へ新しいキーで一度送信した。要求・応答は`.data/printer-diagnostics/9b07689a-2272-4423-aa94-de1276ca1090.json`と同名の`.mqtt.log`へ保存した。
+
+- 印刷操作UUID: `9b07689a-2272-4423-aa94-de1276ca1090`
+- ファイルUUID: `c4435680-29b2-459f-a9ad-44a8b45d2d95`。前回と同じplate 1、ベッドレベリングあり、AMSなし。
+- FTPS転送・サイズ照合・MQTTのIDLE取得成功。
+- 00:21:51 JST、sequence_id `162559625`のproject_file要求に約20msでresult success / reason successのACKを取得。HTTP 200 / accepted、error nullで永続化。
+- ユーザーの「成功したら停止」指示を受け、00:23:11 JSTに固定のprint.stopを一度送信。停止REST APIがないため、この停止だけは診断スクリプトから直接MQTTで実行した。
+- 停止診断UUID: `944a8122-a8eb-4ece-bf15-a57e1f4f53e8`、sequence_id `155494418`。約13msでcommand stop / result successのACKを取得。
+- 停止後のpushallと状態通知を読み取り、RUNNING（stg_cur 4、mc_percent 0、print_error `134201350`）の報告後、00:23:15 JSTにFAILED（print_error `50348044` / `0x0300400c`）へ遷移したことを確認。
+- 停止要求・ACK・終了状態の記録は`.data/printer-diagnostics/944a8122-a8eb-4ece-bf15-a57e1f4f53e8.stop.json`へ保存。自動再送なし。
+
+開始受付と停止後の終了状態は実機で確認した。造形完了・出力品質・各種エラー値の意味・AMS/ベッド設定の個別効果は未検証。印刷操作のacceptedは要求受付の履歴なので、後の停止によってfailedへ書き換えていない。停止APIを検証した結果ではない。Developer Mode有効前の署名拒否と有効後の受付成功を比較し、この試行の拒否原因がコマンド認証にあったことを確認できた。
+
+## 停止REST APIの追加と適用（2026-10-14）
+
+`POST /api/printer/stop`を追加し、稼働サーバーへ適用してpi-wedge.serviceを再起動した。Bearer・Idempotency-Key UUID・Content-Type application/json・厳密な空オブジェクト`{}`を要求する。HTTPハンドラーはPrinterServiceを呼び、MQTTはPrinter.stopPrintを実装するアダプターだけが操作する。停止のpending/accepted/failed/unknownをSQLiteのstopOperationレコードに保存し、開始とはキーの名前空間を共有する。既存のGET operations / POST resolveは両方の操作に対応する。既存の開始レコードと応答形式は維持した。
+
+- `npm run check`: 型・Lint・Format・57テスト・サーバー/UIビルド成功。
+- MQTTモック: 固定stopのみ送信、idle検査・転送・開始なし、異なるcommandのACKを除外、拒否とACK不達を区別。
+- サービス: SQLiteを別接続で開き直して冪等性を確認、開始キーとの衝突、結果不明の開始からの停止、結果不明の停止の再送・新規開始禁止、同時要求拒否、pending復旧を確認。
+- API: 認証・必須キー・未知キー・配列・欠落本文を拒否、受付・拒否・不明のレスポンスと共有ランタイムスキーマ/OpenAPI、照会・手動解決・重複送信防止を確認。
+- 実HTTP: health / api/ready 200、OpenAPIにstopPrint・Bearer・必須Idempotency-Keyを確認。無認証POSTは401、未知キーのJSONとContent-Type省略は400。拒否される要求だけを送り、有効な停止コマンドは実機へ送信していない。
+- 再起動後も以前の開始操作`9b07689a-2272-4423-aa94-de1276ca1090`はacceptedのまま照会でき、サービスはactive。
+
+停止エンドポイント経由の実機キャンセルは未検証。前節の停止成功は診断用の直接MQTTによるもの。UI・CLI・S3は変更していない。

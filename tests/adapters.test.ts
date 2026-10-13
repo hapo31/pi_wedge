@@ -125,7 +125,10 @@ class MockMqtt extends EventEmitter {
   published: Array<Record<string, unknown>> = [];
   subscribeAsync = vi.fn(async () => []);
   endAsync = vi.fn(async () => {});
-  constructor(private mode: 'success' | 'busy' | 'reject' | 'timeout' = 'success') {
+  constructor(
+    private mode:
+      'success' | 'busy' | 'reject' | 'timeout' | 'minimal-ack' | 'error-ack' = 'success',
+  ) {
     super();
   }
   async publishAsync(_topic: string, text: string) {
@@ -147,9 +150,14 @@ class MockMqtt extends EventEmitter {
           Buffer.from(
             JSON.stringify({
               print: {
-                command: 'project_file',
+                ...(this.mode === 'minimal-ack' || this.mode === 'error-ack'
+                  ? {}
+                  : { command: payload.print.command }),
                 sequence_id: payload.print.sequence_id,
-                result: this.mode === 'reject' ? 'fail' : 'success',
+                ...(this.mode === 'error-ack'
+                  ? {}
+                  : { result: this.mode === 'reject' ? 'fail' : 'SUCCESS' }),
+                ...(this.mode === 'error-ack' ? { err_code: 123 } : {}),
               },
             }),
           ),
@@ -205,6 +213,85 @@ describe('Bambu TLS/MQTT/FTPS transport mocks', () => {
       printer('timeout').adapter.startPrint('/x', options, randomUUID()),
     ).rejects.toMatchObject({ code: 'printer_outcome_unknown', status: 504 });
   });
+  it('accepts a correlated ACK without command, normalizes result case and removes exchange listeners', async () => {
+    const p = printer('minimal-ack');
+    await p.adapter.startPrint('/uuid.gcode.3mf', options, randomUUID());
+    expect(p.client.published).toHaveLength(2);
+    expect(p.client.listenerCount('message')).toBe(0);
+    expect(p.client.listenerCount('close')).toBe(0);
+    expect(p.client.listenerCount('error')).toBe(1);
+    await expect(
+      printer('error-ack').adapter.startPrint('/uuid.gcode.3mf', options, randomUUID()),
+    ).rejects.toMatchObject({ code: 'printer_rejected' });
+  });
+  it('logs unmatched reports and ACKs while withholding credentials and arbitrary telemetry', async () => {
+    const logs = vi.spyOn(console, 'info').mockImplementation(() => {});
+    const p = printer('minimal-ack');
+    const publish = p.client.publishAsync.bind(p.client);
+    p.client.publishAsync = async (topic, text) => {
+      if (JSON.parse(text).print)
+        p.client.emit(
+          'message',
+          'device/SERIAL/report',
+          Buffer.from(
+            JSON.stringify({
+              print: {
+                command: 'project_file',
+                sequence_id: 'unrelated',
+                result: 'fail',
+                reason: 'secret SERIAL 192.168.1.2 ftp://other:password@/file',
+                access_code: 'hidden-access-code',
+                private_nested: { password: 'hidden-password' },
+              },
+            }),
+          ),
+        );
+      return publish(topic, text);
+    };
+    const id = randomUUID();
+    try {
+      await p.adapter.startPrint('/uuid.gcode.3mf', options, id);
+      const entries = logs.mock.calls.map(([line]) => JSON.parse(line as string));
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          event: 'printer_mqtt_request',
+          operationId: id,
+          payload: {
+            print: expect.objectContaining({
+              command: 'project_file',
+              url: 'ftp:///uuid.gcode.3mf',
+            }),
+          },
+        }),
+      );
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          event: 'printer_mqtt_response',
+          matched: false,
+          payload: { print: expect.objectContaining({ sequence_id: 'unrelated' }) },
+        }),
+      );
+      expect(entries).toContainEqual(
+        expect.objectContaining({
+          event: 'printer_mqtt_response',
+          matched: true,
+          payload: { print: expect.objectContaining({ result: 'SUCCESS' }) },
+        }),
+      );
+      const text = JSON.stringify(entries);
+      for (const hidden of [
+        'secret',
+        'SERIAL',
+        '192.168.1.2',
+        'other:password',
+        'hidden-access-code',
+        'hidden-password',
+      ])
+        expect(text).not.toContain(hidden);
+    } finally {
+      logs.mockRestore();
+    }
+  });
   it('uses implicit FTPS 990, private TLS and remote-size verification', async () => {
     const config = readConfig({
         API_TOKEN: TOKEN,
@@ -224,11 +311,52 @@ describe('Bambu TLS/MQTT/FTPS transport mocks', () => {
       expect.objectContaining({
         port: 990,
         secure: 'implicit',
-        secureOptions: { rejectUnauthorized: true },
+        secureOptions: expect.objectContaining({
+          rejectUnauthorized: true,
+          checkServerIdentity: expect.any(Function),
+        }),
       }),
     );
     expect(ftp.size).toHaveBeenCalledOnce();
     expect(ftp.close).toHaveBeenCalledOnce();
+  });
+  it('stops without an idle check or upload and ignores an ACK for a different command', async () => {
+    const p = printer('busy');
+    const publish = p.client.publishAsync.bind(p.client);
+    p.client.publishAsync = async (topic, text) => {
+      const request = JSON.parse(text).print;
+      p.client.emit(
+        'message',
+        'device/SERIAL/report',
+        Buffer.from(
+          JSON.stringify({
+            print: {
+              sequence_id: request.sequence_id,
+              command: 'project_file',
+              result: 'fail',
+            },
+          }),
+        ),
+      );
+      return publish(topic, text);
+    };
+    await p.adapter.stopPrint(randomUUID());
+    expect(p.client.published).toEqual([
+      {
+        print: {
+          sequence_id: expect.any(String),
+          command: 'stop',
+          param: '',
+        },
+      },
+    ]);
+    expect(p.client.endAsync).toHaveBeenCalledOnce();
+    await expect(printer('error-ack').adapter.stopPrint(randomUUID())).rejects.toMatchObject({
+      code: 'printer_rejected',
+    });
+    await expect(printer('timeout').adapter.stopPrint(randomUUID())).rejects.toMatchObject({
+      code: 'printer_outcome_unknown',
+    });
   });
 });
 describe('G-code container adapter', () => {

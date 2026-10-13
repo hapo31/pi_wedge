@@ -15,6 +15,7 @@ OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はロー
 | GET /api/files/{uuid}/gcode                        | UUID                                                          | 200 text/plain                 | G-code抽出のみ                                        |
 | POST /api/printer/upload                           | JSON fileId                                                   | 200 転送結果                   | プリンターのストレージへ書込、機構を動かさない        |
 | POST /api/printer/print                            | JSON fileId/options、Idempotency-Key(UUID)                    | 200 操作結果                   | 機器動作・加熱・造形開始                              |
+| POST /api/printer/stop                             | JSON {}、Idempotency-Key(UUID)                                | 200 停止操作結果               | 現在の印刷をキャンセル、終了動作が続くことがある      |
 | GET /api/printer/operations/{operationId}          | UUID                                                          | 200 操作の確定/不確定結果      | なし                                                  |
 | POST /api/printer/operations/{operationId}/resolve | outcome + inspectionNote                                      | 200 更新結果                   | 実機を確認した管理者がunknownを解決、機器は動かさない |
 | GET /preview/{uuid}                                | UUID                                                          | 200 React shell                | トークン入力なし、自動プレビュー                      |
@@ -32,9 +33,38 @@ OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はロー
 
 ジョブ状態: queued→running→succeeded|failed。succeeded時だけresultFileIdが参照可能。エラーはcode/message、推定時間/材料は未取得時null。スライス結果本体は直接返さない。
 印刷操作: pending→accepted|failed|unknown。MQTT ACKはコマンド受付で、造形完了ではない。Idempotency-Keyは恒久保存、同一内容なら以前の結果を返し、別内容は409。pending/unknownの再送はしない。結果不明時はプリンター画面で確認してから新しい操作を判断する。
+
+停止APIはBearer・UUIDのIdempotency-Key・空のJSONオブジェクト`{}`を必須とし、本文の未知キーを拒否する。ファイルを転送せず、固定のprint.stopを送る。停止結果は`{id, action: "stop", state, createdAt, error}`。pending→accepted|failed|unknown、HTTP 200/502/504は開始と同じ。acceptedは停止要求の受付で、完全停止の確認ではない。GET operationsとPOST resolveは開始・停止双方の操作を返す。停止しても開始操作の受付履歴を書き換えない。
+
+キーは開始・停止で共有する名前空間とし、同じキーを別の動作に使うと409。同じキーの再呼出しは保存した状態を返し、pending/unknownを再送しない。未解決の開始があっても、実行中の転送・MQTT交換がなければ明示的停止を受け付ける。未解決の停止があると新しい停止・開始キーを409で拒否し、実機確認後に既存resolveで解決する。プリンター操作は直列なので、他の通信処理中は停止もprinter_busyで拒否する。起動時のpending停止はunknownに復旧する。
+
+ACKは同一sequence_idと結果で照合し、commandが省略された応答にも対応する。resultの大文字小文字を区別しない。MQTT診断ログは操作UUIDで追跡し、秘密を伏せた要求・照合対象外も含む応答・送信完了・交換の終了理由を記録する。開始のレスポンス形式を維持し、操作照会・解決には停止操作のレスポンス形式を追加する。
 任意設定は許可リスト（wallLoops/topShellLayers/bottomShellLayers）に限定。ユーザー定義G-code・CLIパス・任意JSON設定は受け取らない。
 
 ## 使用例
+
+停止要求のHTTP例（Bearerと新しいUUIDキーを指定する）:
+
+```http
+POST /api/printer/stop
+Authorization: Bearer <API_TOKEN>
+Idempotency-Key: 0198cdf0-b8f1-4de0-8d67-2d9e95ed019c
+Content-Type: application/json
+
+{}
+```
+
+受付成功の例:
+
+```json
+{
+  "id": "0198cdf0-b8f1-4de0-8d67-2d9e95ed019c",
+  "action": "stop",
+  "state": "accepted",
+  "createdAt": "2026-10-14T00:00:00.000Z",
+  "error": null
+}
+```
 
 トークンはHTTP Authorizationヘッダーに指定する。以下の環境変数はクライアント側で設定する。
 

@@ -35,7 +35,9 @@ Orca/FreeCAD導入と`npm run profiles:prepare`は[スライサー手順](docs/s
 | 1        | 完了 | UUID/ジョブ/エラー/FTPS・MQTTモック、実Orca+FreeCAD→S3保存（STL/STEP/インチ/複数ソリッド） |
 | 2        | 完了 | 実WebGL/レイヤー/統計/確認付き印刷UI、デスクトップと390px幅、404/上限エラー                |
 
-**A1 miniへの実転送・実印刷は未検証**。プリンターは既定で無効。実機でのフェーズ1受入れ条件は[printer.md](docs/printer.md)の手順で確認する。Pi 5での最大入力の性能も未測定。ソフトウェアの自動テストとハードウェア受入れを区別した詳細は[検証記録](docs/verification.md)。
+**A1 miniへの実FTPS転送・印刷要求受付・RUNNING状態・停止は確認済み、造形完了と品質は未検証**。2026-10-14の印刷API試行は署名不足で拒否されたが、実機のDeveloper Mode有効後に受付が成功した。プリンターは既定で無効。実機でのフェーズ1受入れ条件は[printer.md](docs/printer.md)の手順で確認する。Pi 5での最大入力の性能も未測定。ソフトウェアの自動テストとハードウェア受入れを区別した詳細は[検証記録](docs/verification.md)。
+
+管理用の停止APIは`POST /api/printer/stop`（Bearer・Idempotency-Key UUID・JSON `{}`）。停止操作もSQLiteに保存し、同じキーでは再送しない。停止エンドポイントはモックで検証、実機の停止確認は診断用MQTTスクリプトによるもの。[API仕様と例](docs/api-design.md)を参照。
 
 Orca2.4.2の公式ARM64版はglibc条件によりDebian12へ直接導入できない。新規のネイティブ構築はRaspberry Pi OSのDebian13系を選択する。Debian12では検証済みの `TOOLS_BACKEND=docker` を選べる。[依存導入手順](docs/slicer.md)に従う。アプリ本体はNode24があればDebian12でも動作する。
 

@@ -83,6 +83,7 @@ export async function setup(
   const adapter: Printer = overrides.printer ?? {
     upload: vi.fn(async (file) => ({ remotePath: `/${file.id}.gcode.3mf` })),
     startPrint: vi.fn(async () => {}),
+    stopPrint: vi.fn(async () => {}),
   };
   const jobs = new JobService(files, slicer, converter, dir, 1, overrides.maxQueued ?? 20),
     printer = new PrinterService(files, adapter, dir);

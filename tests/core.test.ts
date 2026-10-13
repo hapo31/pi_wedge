@@ -8,6 +8,8 @@ import { SliceOptionsSchema, PrintOptionsSchema } from '../src/domain/schemas.js
 import { validateModel } from '../src/services/files.js';
 import { AppError } from '../src/domain/errors.js';
 import { Repository } from '../src/adapters/repository.js';
+import { FileService } from '../src/services/files.js';
+import { PrinterService } from '../src/services/printer.js';
 const cleanup: Array<() => Promise<void>> = [];
 afterEach(async () => {
   for (const close of cleanup.splice(0)) await close();
@@ -207,6 +209,7 @@ describe('printer orchestration and persistent idempotency', () => {
           startPrint: vi
             .fn()
             .mockRejectedValue(new AppError('printer_outcome_unknown', 'Unknown dispatch', 504)),
+          stopPrint: vi.fn(async () => {}),
         },
       }),
       id = await artifact(c),
@@ -230,5 +233,101 @@ describe('printer orchestration and persistent idempotency', () => {
     });
     await c.printer.recover();
     expect(c.printer.get(key).state).toBe('unknown');
+  });
+  it('persists stop idempotency across reopened SQLite and forbids sharing keys with start', async () => {
+    const c = await context(),
+      key = randomUUID();
+    expect((await c.printer.stopPrint(key)).state).toBe('accepted');
+    expect(c.adapter.upload).not.toHaveBeenCalled();
+    expect(c.adapter.startPrint).not.toHaveBeenCalled();
+    const repository = new Repository(join(c.dir, 'metadata.sqlite'));
+    try {
+      const service = new PrinterService(
+        new FileService(repository, c.storage, 1048576, 10485760),
+        c.adapter,
+        c.dir,
+      );
+      expect((await service.stopPrint(key)).state).toBe('accepted');
+      expect(c.adapter.stopPrint).toHaveBeenCalledOnce();
+      await expect(
+        service.print(randomUUID(), PrintOptionsSchema.parse({}), key),
+      ).rejects.toMatchObject({ code: 'idempotency_conflict' });
+      const startKey = randomUUID();
+      repository.insert('operation', {
+        id: startKey,
+        fileId: randomUUID(),
+        options: PrintOptionsSchema.parse({}),
+        state: 'accepted',
+        createdAt: new Date().toISOString(),
+        error: null,
+      });
+      await expect(service.stopPrint(startKey)).rejects.toMatchObject({
+        code: 'idempotency_conflict',
+      });
+    } finally {
+      repository.close();
+    }
+  });
+  it('permits stop despite an unresolved start, but preserves that start outcome', async () => {
+    const c = await context(),
+      startKey = randomUUID();
+    c.repository.insert('operation', {
+      id: startKey,
+      fileId: randomUUID(),
+      options: PrintOptionsSchema.parse({}),
+      state: 'unknown',
+      createdAt: new Date().toISOString(),
+      error: null,
+    });
+    expect((await c.printer.stopPrint(randomUUID())).state).toBe('accepted');
+    expect(c.printer.get(startKey).state).toBe('unknown');
+  });
+  it('does not resend unknown stops and blocks fresh stop/start keys until resolution', async () => {
+    const c = await context(),
+      id = await artifact(c),
+      key = randomUUID();
+    vi.mocked(c.adapter.stopPrint).mockRejectedValue(
+      new AppError('printer_outcome_unknown', 'Lost stop ACK', 504),
+    );
+    expect((await c.printer.stopPrint(key)).state).toBe('unknown');
+    await c.printer.stopPrint(key);
+    expect(c.adapter.stopPrint).toHaveBeenCalledOnce();
+    await expect(c.printer.stopPrint(randomUUID())).rejects.toMatchObject({ status: 409 });
+    await expect(
+      c.printer.print(id, PrintOptionsSchema.parse({}), randomUUID()),
+    ).rejects.toMatchObject({ status: 409 });
+    c.printer.resolveUnknown(key, 'accepted', 'Inspected printer: stopped.');
+    expect((await c.printer.print(id, PrintOptionsSchema.parse({}), randomUUID())).state).toBe(
+      'accepted',
+    );
+    expect(c.printer.get(key)).toMatchObject({ action: 'stop', state: 'accepted' });
+  });
+  it('returns pending for the same in-flight stop, rejects concurrent commands and recovers pending stops', async () => {
+    const c = await context(),
+      key = randomUUID();
+    let release!: () => void;
+    vi.mocked(c.adapter.stopPrint).mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          release = resolve;
+        }),
+    );
+    const stopping = c.printer.stopPrint(key);
+    expect((await c.printer.stopPrint(key)).state).toBe('pending');
+    await expect(c.printer.stopPrint(randomUUID())).rejects.toMatchObject({ code: 'printer_busy' });
+    release();
+    await stopping;
+    const pendingKey = randomUUID();
+    c.repository.insert('stopOperation', {
+      id: pendingKey,
+      action: 'stop',
+      state: 'pending',
+      createdAt: new Date().toISOString(),
+      error: null,
+    });
+    await c.printer.recover();
+    expect(c.printer.get(pendingKey)).toMatchObject({ action: 'stop', state: 'unknown' });
+    await c.printer.stopPrint(pendingKey);
+    expect(c.adapter.stopPrint).toHaveBeenCalledOnce();
   });
 });
