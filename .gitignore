@@ -1,0 +1,15 @@
+node_modules/
+dist/
+coverage/
+.data/
+.env
+.env.*
+!.env.example
+*.sqlite*
+*.gcode
+*.gcode.3mf
+*.log
+profiles/generated/
+.agents/
+.aws/
+.codex/
