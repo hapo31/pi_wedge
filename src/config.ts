@@ -19,6 +19,11 @@ const envSchema = z.object({
   SLICE_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
   MAX_QUEUED_JOBS: z.coerce.number().int().min(1).max(100).default(20),
   COMMAND_TIMEOUT_MS: z.coerce.number().int().min(1000).max(3600000).default(600000),
+  TOOLS_BACKEND: z.enum(['native', 'docker']).default('native'),
+  TOOLS_IMAGE: z
+    .string()
+    .regex(/^[a-zA-Z0-9_./:@-]+$/)
+    .default('pi-wedge-tools:0.1'),
   ORCA_BIN: z.string().default('/opt/orcaslicer/AppRun'),
   ORCA_XVFB: bool,
   PROFILE_DIR: z.string().default('./profiles/generated'),

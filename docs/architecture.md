@@ -26,3 +26,5 @@ HTTP層→サービス→domain契約、adapterは契約を実装する。入力
 境界間の原子的トランザクションは不可能なのでstaging/ready/failedと起動時照合を採用。ログはUUIDと安全なエラーコード中心。APIの内部エラーに資格情報・パスを含めない。
 
 起動時にSQLiteのserver_ownerをBEGIN IMMEDIATEで取得し、同じDATA_DIRを別サーバーが使用中なら拒否する。死んだPIDの所有権のみ再取得して復旧し、実行中の一時領域を別プロセスが削除する事故を防ぐ。複数ホストでDBを共有する運用は対象外。
+
+外部CLI実行はnative/DockerのCommandRunnerを選択できる。SlicerとConverterの契約は共通。隔離ツールはネットワーク無効、入力/出力/管理者プロフィールのみを共有し、APIサーバーの資格情報を保持しない。

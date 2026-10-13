@@ -559,7 +559,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
   );
   app.get('/docs', (c) =>
     c.html(
-      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>pi_wedge API</title><link rel="stylesheet" href="/swagger/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="/swagger/swagger-ui-bundle.js"></script><script>SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui',persistAuthorization:false})</script></body></html>`,
+      `<!doctype html><html lang="ja"><head><meta charset="utf-8"><title>pi_wedge API</title><link rel="stylesheet" href="/swagger/swagger-ui.css"></head><body><div id="swagger-ui"></div><script src="/swagger/swagger-ui-bundle.js"></script><script>SwaggerUIBundle({url:'/openapi.json',dom_id:'#swagger-ui',persistAuthorization:false,validatorUrl:null})</script></body></html>`,
     ),
   );
   app.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {

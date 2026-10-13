@@ -2,6 +2,7 @@ import { resolve } from 'node:path';
 import type { Config } from './config.js';
 import { Repository } from './adapters/repository.js';
 import { S3Storage, LocalStorage } from './adapters/storage.js';
+import { DockerCommandRunner } from './adapters/docker-command.js';
 import { ProcessRunner } from './adapters/command.js';
 import { OrcaSlicerAdapter } from './adapters/orca.js';
 import { FreeCadConverter } from './adapters/converter.js';
@@ -56,7 +57,11 @@ export async function bootstrap(config: Config) {
     config.MAX_UPLOAD_MB * 1048576,
     config.MAX_ARTIFACT_MB * 1048576,
   );
-  const runner = new ProcessRunner(config.COMMAND_TIMEOUT_MS);
+  const nativeRunner = new ProcessRunner(config.COMMAND_TIMEOUT_MS);
+  const runner =
+    config.TOOLS_BACKEND === 'docker'
+      ? new DockerCommandRunner(nativeRunner, config)
+      : nativeRunner;
   const jobs = new JobService(
     files,
     new OrcaSlicerAdapter(runner, config),
@@ -79,6 +84,7 @@ export async function bootstrap(config: Config) {
   // A unavailable storage must not prevent liveness/docs; keep API disabled until recovery succeeds.
   let ready = false;
   try {
+    if (runner instanceof DockerCommandRunner) await runner.recover();
     await storage.check();
     await files.recover();
     await printer.recover();

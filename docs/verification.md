@@ -9,7 +9,7 @@
 | Hono/Swagger/OpenAPI   | 実HTTP、ローカルSwagger JS/CSS                                       | 成功                                                                            |
 | SeaweedFS 4.48         | ARM64 Compose、/var/lib/pi_wedge→/data、S3書込→force-recreate→再読取 | データ一致                                                                      |
 | S3Storage              | 実SeaweedFSでput/head/get/delete                                     | 成功                                                                            |
-| API/サービス           | Vitest、CLI runnerは実子プロセス、プリンターはモック                 | 最終39テスト成功（CLI/所有権/サービス/API/プレビュー）                          |
+| API/サービス           | Vitest、CLI runnerは実子プロセス、プリンターはモック                 | 最終43テスト成功（CLI/所有権/サービス/API/プレビュー）                          |
 | Orca2.4.2 + FreeCAD1.0 | ARM64 Debian13コンテナ、ネットワーク無効                             | 実ツールで成功                                                                  |
 | STL20mm cube           | 非同期ジョブ→Orca→S3保存→UUID→preview text                           | succeeded、約71KBのgcode.3mf、約466KB G-code                                    |
 | STEP20mm cube          | FreeCAD→STL→同じスライサー/保存経路                                  | succeeded、3.62g / 1213.85mm、総推定1356秒                                      |
@@ -38,3 +38,5 @@ Pi 5 8GBでの最大モデル・高精度STEPのRSS/時間/温度、長期運用
 `npm run check`。SeaweedFS稼働時`npm run test:storage`。実ツール設定後`npm run test:slice -- path/to/model.stl path/to/model.step`。既定DB/ストレージへテストモデル・結果が保存されるため、検証専用DATA_DIR/S3_BUCKETで実行する。
 ブラウザ: サーバーを起動して`npx playwright install --with-deps chromium`、`npm run test:e2e`。画像は.data/preview-desktop.png / .data/preview-mobile.png（Git外）。
 検証用ARM64ツールイメージは `docker build -f deploy/Dockerfile.tools -t pi-wedge-tools:0.1 .`。これはホスト互換性を切り分ける補助環境で、アプリの既定実行方法はホストのCLIである。元ファイル/設定/一時ディレクトリだけをバインドして検証し、秘密をコンテナへ渡さない。
+
+追加検証: Debian12標準サーバーにTOOLS_BACKEND=dockerを設定し、POST /api/slicesのmultipartからSTL/STEPを受信して実ツール処理、S3保存、GET job/file/gcodeまで通した。コンテナtimeout/ラベル回収/回収失敗は自動テスト。環境テンプレートの既定はnative、ローカル.envはこの検証環境に合わせdockerを選択した。

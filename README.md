@@ -18,7 +18,7 @@ npm run dev
 
 既定は127.0.0.1:3000。LANへ公開する場合HOST=0.0.0.0とファイアウォールを設定。`/health`、[Swagger](http://localhost:3000/docs)、[OpenAPI JSON](http://localhost:3000/openapi.json)。SwaggerのAuthorizeへAPI_TOKENを入力。文書/UI資産はローカル配信。
 
-`npm run check`で型/Lint/Format/39テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
+`npm run check`で型/Lint/Format/43テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
 
 ## 本番
 
@@ -35,7 +35,7 @@ Orca/FreeCAD導入と`npm run profiles:prepare`は[スライサー手順](docs/s
 
 **A1 miniへの実転送・実印刷は未検証**。プリンターは既定で無効。実機でのフェーズ1受入れ条件は[printer.md](docs/printer.md)の手順で確認する。Pi 5での最大入力の性能も未測定。ソフトウェアの自動テストとハードウェア受入れを区別した詳細は[検証記録](docs/verification.md)。
 
-Orca2.4.2の公式ARM64版はglibc条件によりDebian12へ直接導入できない。新規ホスト構築はRaspberry Pi OSのDebian13系を選択し、[依存導入手順](docs/slicer.md)に従う。アプリ本体はNode24があればDebian12でも動作する。
+Orca2.4.2の公式ARM64版はglibc条件によりDebian12へ直接導入できない。新規のネイティブ構築はRaspberry Pi OSのDebian13系を選択する。Debian12では検証済みの `TOOLS_BACKEND=docker` を選べる。[依存導入手順](docs/slicer.md)に従う。アプリ本体はNode24があればDebian12でも動作する。
 
 ## 利用の流れ
 

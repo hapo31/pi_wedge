@@ -42,3 +42,9 @@ npm run profiles:prepare
 ```
 
 本検証ではCLIにDISPLAY/Xvfb不要。--help、STL/STEP/インチ/2ソリッドを成功確認。Xvfbはディスプレイ初期化が必要な別ビルドのための任意設定。プロファイル由来のAGPLライセンスはmanifestの出所を確認。生成物を配布する場合は上流ライセンスに従う。
+
+## Debian12を保持する隔離ツールモード
+
+`docker build -f deploy/Dockerfile.tools -t pi-wedge-tools:0.1 .` を実行し、`.env`に `TOOLS_BACKEND=docker`、`TOOLS_IMAGE=pi-wedge-tools:0.1`、`ORCA_BIN=/opt/squashfs-root/AppRun`、`FREECAD_PYTHON=/usr/bin/python3`、`FREECAD_MODULE_PATH=/usr/lib/freecad-python3/lib` を設定する。プロファイルは同じ `npm run profiles:prepare` で準備する。アプリの実行ユーザーにはDocker操作権限が必要。DockerソケットをAPIへ公開しない。
+
+DockerCommandRunnerがジョブ領域・プロファイル・固定の変換スクリプトだけをマウントし、ネットワーク無効・image pull無効で実行する（イメージは事前ビルド必須）。S3/プリンター/API資格情報をツールへ渡さない。CLI timeout後にコンテナを強制削除し、起動時はDATA_DIRラベルの残存コンテナを回収する。コンテナ回収に失敗した場合は依存復旧失敗として受付を止める。4GiB/3CPU/256PID上限はDockerに指定する。実ホストのcgroup対応を確認する（検証ホストはmemory limit非対応の警告を出したため、Pi上の上限動作は別検証）。
