@@ -4,7 +4,7 @@ const bool = z
   .default('false')
   .transform((v) => v === 'true');
 const envSchema = z.object({
-  HOST: z.string().default('127.0.0.1'),
+  HOST: z.string().default('0.0.0.0'),
   PORT: z.coerce.number().int().min(1).max(65535).default(3000),
   API_TOKEN: z.string().min(32),
   DATA_DIR: z.string().default('./.data/app'),

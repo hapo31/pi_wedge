@@ -16,7 +16,9 @@ docker compose up -d seaweedfs
 npm run dev
 ```
 
-既定は127.0.0.1:3000。LANへ公開する場合HOST=0.0.0.0とファイアウォールを設定。`/health`、[Swagger](http://localhost:3000/docs)、[OpenAPI JSON](http://localhost:3000/openapi.json)。SwaggerのAuthorizeへAPI_TOKENを入力。文書/UI資産はローカル配信。
+既定は `HOST=0.0.0.0` / ポート3000でLANから接続できる。既存の `.env` が `HOST=127.0.0.1` の場合は `HOST=0.0.0.0` に変更してサーバーを再起動する。ローカル限定の運用は `HOST=127.0.0.1` を指定する。`/health`、[Swagger](http://localhost:3000/docs)、[OpenAPI JSON](http://localhost:3000/openapi.json)。SwaggerのAuthorizeへAPI_TOKENを入力。文書/UI資産はローカル配信。
+
+同じLAN/Wi-Fiのスマホでは `http://サーバーのLAN-IP:3000/preview/{resultFileId}` を開き、API_TOKENを入力する。サーバーでAvahi等のmDNSが稼働している場合は `http://ホスト名.local:3000/preview/{resultFileId}` でも開ける（例: ホスト名 `raspberrypi` なら `raspberrypi.local`）。実際のIPは `hostname -I`、ホスト名は `hostname` で確認する。ファイアウォールを使う場合はLANからのTCP 3000を許可する。SeaweedFSのS3/管理ポートは引き続きホスト内で利用する。
 
 `npm run check`で型/Lint/Format/43テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
 

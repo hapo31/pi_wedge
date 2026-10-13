@@ -54,3 +54,11 @@ Pi 5 8GBでの最大モデル・高精度STEPのRSS/時間/温度、長期運用
 - 実ChromiumでUUIDから取得・3D表示、レイヤー70（高さ14.00mm）への切替、単一レイヤーと移動経路表示を確認。JavaScriptエラーなし。プリンターは無効、印刷ボタンは無効、プリンターAPI呼出し0回。
 
 生成物・検証JSON・スクリーンショットは `.data/measuring-cup-test/`（Git管理外）に保存した。実機への転送・印刷、容量精度や水密性は検証していない。
+
+## LANからのプレビュー接続（2026-10-13）
+
+HTTPの既定とローカル `.env` を `HOST=0.0.0.0` に変更し、標準サーバーを正常終了・再起動した。`ss` で `0.0.0.0:3000` の待ち受けを確認。SeaweedFSは `127.0.0.1:8333` のまま。ホストのAvahiは稼働済みで、`pi5s.local` がLAN IPv4 `192.168.11.62` に解決された。
+
+`http://pi5s.local:3000` と `http://192.168.11.62:3000` の両方でhealth・計量カップのプレビューページ・認証済みメタデータ/G-code取得が200、未認証のメタデータ取得が401となった。LAN IP経由の実Chromium（390×844、タッチ端末エミュレーション）で141層の3D表示、70層への切替、横にはみ出さないことを確認。JavaScriptエラーとプリンターAPI呼出しは0回。スクリーンショットと結果JSONは `.data/measuring-cup-test/preview-mobile-lan.png` / `lan-mobile.json` に保存。
+
+`npm run check` は型・Lint・Format・43テスト・サーバー/UIビルドに成功。LAN IPをbaseURLとしたPlaywrightの既存2テストも成功（印刷APIはモック）。実スマートフォンや別の物理端末からの接続は未検証。同じLANの端末ではmDNS URLを利用でき、名前解決が使えない端末はLAN IPで接続する。

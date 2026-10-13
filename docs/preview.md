@@ -6,6 +6,8 @@ React + TypeScript、Three.jsベースの[gcode-preview](https://github.com/xyz-
 
 APIトークンは画面で入力、Reactメモリだけに保持しURL/localStorageへ保存しない。Swaggerの認証と独立。401/404/422/413を日本語で表示。
 
+スマホからは同じLANの `http://ホスト名.local:3000/preview/{uuid}`（mDNS稼働時）または `http://LAN-IP:3000/preview/{uuid}` を使う。APIサーバーの既定待ち受けは `HOST=0.0.0.0`。APIのURLは相対パスなのでアクセスしたホスト名/IPのままデータを取得できる。Viteの開発サーバーを起動せず、ビルド済みUIをAPIサーバーから配信する構成で利用可能。
+
 負荷対策: サーバーMAX_PREVIEW_MB既定32、browser response上限、250,000行/コメント64KiB・コマンド4KiB上限、ストリームを小batchに分割しevent loopへyield、キャンセルとdispose。描画用geometryは最終的にメインスレッドに残るため無制限規模を保証しない。上限超過はdownloadを案内。モバイルでは統計を下へ配置。
 
 確認: raw/container同じツールパス、無効ファイル/ZIP bomb拒否、レイヤースライダー反映、build volume、統計null表示、確認キャンセルで送信なし、二重クリック1送信、失敗・unknown表示。WebGL実ブラウザ検証と型/ビルドを別々に記録。
