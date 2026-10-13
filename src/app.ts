@@ -4,7 +4,9 @@ import { bodyLimit } from 'hono/body-limit';
 import { secureHeaders } from 'hono/secure-headers';
 import { HTTPException } from 'hono/http-exception';
 import { createRequire } from 'node:module';
-import { dirname } from 'node:path';
+import { dirname, resolve, join } from 'node:path';
+import { readFile } from 'node:fs/promises';
+import { PreviewService } from './services/preview.js';
 import { timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
@@ -24,6 +26,7 @@ const json = <T extends z.ZodType>(schema: T, description: string, example?: unk
   content: { 'application/json': { schema, ...(example ? { example } : {}) } },
 });
 const errors = {
+  500: json(ErrorResponse, 'Unexpected internal error; inspect server logs by request/job UUID'),
   400: json(ErrorResponse, 'Invalid request, UUID or model content'),
   401: json(ErrorResponse, 'Missing or invalid Bearer token'),
   404: json(ErrorResponse, 'UUID does not exist'),
@@ -123,7 +126,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
   );
   app.use('/api/*', async (c, next) => {
     if (!services) throw new AppError('unavailable', 'Services are not configured', 503);
-    const supplied = Buffer.from(c.req.header('Authorization')?.replace(/^Bearer /, '') ?? ''),
+    const supplied = Buffer.from(c.req.header('Authorization')?.match(/^Bearer (.+)$/i)?.[1] ?? ''),
       expected = Buffer.from(services.config.API_TOKEN);
     if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected))
       return c.json(
@@ -485,6 +488,69 @@ export function createApp(services?: Services & { ready?: boolean }) {
       },
     );
   }
+  if (services) {
+    const preview =
+      services.preview ??
+      new PreviewService(
+        services.files,
+        services.config.DATA_DIR,
+        services.config.MAX_PREVIEW_MB * 1048576,
+      );
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/files/{uuid}/gcode',
+        operationId: 'getPreviewGcode',
+        security: secured,
+        summary: 'Get bounded text G-code for browser preview',
+        description: `Extracts Metadata/plate_1.gcode from gcode.3mf or reads plain G-code. Limit ${services.config.MAX_PREVIEW_MB} MiB and 250,000 lines; larger artifacts remain downloadable/printable. No physical printer side effects. Invalid ZIP/toolpath returns 422.`,
+        request: { params: fileParams },
+        responses: {
+          200: {
+            description: 'UTF-8 G-code text for preview',
+            content: {
+              'text/plain': { schema: z.string(), example: 'G21\nG90\nM83\nG1 X10 Y10 Z0.2 E1\n' },
+            },
+          },
+          ...errors,
+        },
+      }),
+      async (c) => {
+        c.header('Cache-Control', 'no-store');
+        return c.text(await preview.text(c.req.valid('param').uuid), 200);
+      },
+    );
+  }
+  const webRoot = resolve('dist/web');
+  app.get('/assets/*', serveStatic({ root: webRoot }));
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/preview/{uuid}',
+      operationId: 'openPreview',
+      summary: 'Open the browser preview shell',
+      description:
+        'Public UI shell; file data requires a Bearer token entered in the browser. Displays paths/layers/statistics. Physical printing occurs only after the separate confirmed print action.',
+      request: { params: fileParams },
+      responses: {
+        200: {
+          description: 'React preview page',
+          content: { 'text/html': { schema: z.string() } },
+        },
+        400: errors[400],
+        404: errors[404],
+        503: errors[503],
+      },
+    }),
+    async (c) => {
+      try {
+        return c.html(await readFile(join(webRoot, 'index.html'), 'utf8'));
+      } catch {
+        throw new AppError('ui_unbuilt', 'Build the web application with npm run build', 503);
+      }
+    },
+  );
+  app.get('/', (c) => c.redirect('/docs'));
   const require = createRequire(import.meta.url),
     swaggerRoot = dirname(require.resolve('swagger-ui-dist/package.json'));
   app.get(

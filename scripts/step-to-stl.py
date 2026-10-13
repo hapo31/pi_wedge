@@ -6,6 +6,7 @@ import sys
 with open(os.environ['PI_WEDGE_CONVERSION_CONFIG'], encoding='utf-8') as source:
     config = json.load(source)
 sys.path.insert(0, config['modulePath'])
+import FreeCAD  # noqa: E402,F401 - initializes the CAD kernel before Part
 import Part  # noqa: E402
 import MeshPart  # noqa: E402
 

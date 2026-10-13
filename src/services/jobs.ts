@@ -1,5 +1,5 @@
 import { randomUUID } from 'node:crypto';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Slicer, ModelConverter, ModelFile } from '../domain/contracts.js';
 import type { SliceOptions, SliceJob } from '../domain/schemas.js';
@@ -107,6 +107,26 @@ export class JobService {
     } finally {
       job.finishedAt = new Date().toISOString();
       this.files.repository.save('job', job);
+      if (workDir) {
+        const logs = [];
+        for (const name of ['freecad.log', 'orca.log']) {
+          try {
+            logs.push(name + '\n' + (await readFile(join(workDir, name), 'utf8')));
+          } catch {
+            /* Tool was not invoked or failed before logging. */
+          }
+        }
+        if (logs.length) {
+          try {
+            await mkdir(resolve(this.dataDir, 'logs'), { recursive: true });
+            await writeFile(resolve(this.dataDir, 'logs', `${id}.log`), logs.join('\n'), {
+              mode: 0o600,
+            });
+          } catch (e) {
+            logError('job_log', id, e);
+          }
+        }
+      }
       if (workDir)
         await rm(workDir, { recursive: true, force: true }).catch((e) =>
           logError('temp_cleanup', id, e),

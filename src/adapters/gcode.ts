@@ -99,7 +99,7 @@ export async function inspectGcode(stream: Readable) {
     filamentGrams: number | null = null,
     filamentMillimeters: number | null = null;
   function line(text: string) {
-    if (++lines > 2000000 || text.length > 4096)
+    if (++lines > 2000000 || text.length > (text.trimStart().startsWith(';') ? 65536 : 4096))
       throw new AppError('invalid_gcode', 'G-code line limit exceeded', 422);
     if (/^G[0123]\s/i.test(text.trim())) {
       if (/(?:NaN|Infinity)/i.test(text))
@@ -110,7 +110,9 @@ export async function inspectGcode(stream: Readable) {
           throw new AppError('invalid_gcode', 'Invalid or excessive toolpath coordinate', 422);
       if (/[XY]/i.test(code)) hasMovement = true;
     }
-    const time = text.match(/estimated printing time.*?=\s*(.*)/i);
+    const time =
+      text.match(/total estimated time:\s*([^;]+)/i) ??
+      text.match(/estimated printing time.*?=\s*(.*)/i);
     if (time) {
       const t = time[1] ?? '';
       let s = 0;
@@ -133,7 +135,7 @@ export async function inspectGcode(stream: Readable) {
         line(remainder.slice(0, newline));
         remainder = remainder.slice(newline + 1);
       }
-      if (remainder.length > 4096)
+      if (remainder.length > 65536)
         throw new AppError('invalid_gcode', 'G-code line limit exceeded', 422);
     }
     if (remainder) line(remainder);

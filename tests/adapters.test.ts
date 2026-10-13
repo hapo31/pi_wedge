@@ -40,12 +40,12 @@ describe('external command runner', () => {
   });
   it('detects abnormal exits, timeout, unavailable executables and hides secrets from child env', async () => {
     const dir = await temp(),
-      runner = new ProcessRunner(100);
+      runner = new ProcessRunner(2000);
     await expect(
       runner.run(process.execPath, ['-e', 'process.exit(3)'], dir),
     ).rejects.toMatchObject({ code: 'command_failed' });
     await expect(
-      runner.run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], dir),
+      new ProcessRunner(100).run(process.execPath, ['-e', 'setInterval(()=>{},1000)'], dir),
     ).rejects.toMatchObject({ code: 'command_timeout' });
     await expect(runner.run('/nonexistent/tool', [], dir)).rejects.toMatchObject({
       code: 'command_unavailable',
@@ -73,8 +73,8 @@ describe('Orca and FreeCAD boundaries (fake runner, no hardware claim)', () => {
     await writeFile(join(dir, 'process.json'), '{}');
     await writeFile(join(dir, 'filament.json'), '{}');
     const runner = {
-      run: vi.fn(async (_cmd: string, args: string[]) => {
-        const path = args[args.indexOf('--export-3mf') + 1]!;
+      run: vi.fn(async (_cmd: string, args: string[], cwd: string) => {
+        const path = join(cwd, args[args.indexOf('--export-3mf') + 1]!);
         await writeFile(path, storedZip('Metadata/plate_1.gcode', Buffer.from(GCODE)));
         return { stdout: '', stderr: '' };
       }),
@@ -241,6 +241,18 @@ describe('G-code container adapter', () => {
       filamentGrams: 1.2,
       filamentMillimeters: 340,
     });
+  });
+  it('accepts Orca 2.4 long profile comments and total-time statistics', async () => {
+    const dir = await temp(),
+      path = join(dir, 'long.gcode');
+    await writeFile(
+      path,
+      '; machine_start_gcode = ' +
+        'x'.repeat(12000) +
+        '\n; model printing time: 16m 33s; total estimated time: 22m 37s\n' +
+        GCODE.replace(/; estimated printing time[^\n]*\n/, ''),
+    );
+    expect((await inspectGcode(await openGcode(path, 'gcode', 20000))).estimatedSeconds).toBe(1357);
   });
   it('rejects malformed archives, missing plate and excessive uncompressed size', async () => {
     const dir = await temp(),

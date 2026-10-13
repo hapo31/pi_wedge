@@ -34,3 +34,5 @@ Vitestで抽象化、UUID、入力、キュー状態、再起動、ストレー�
 ## 変更後チェック
 
 `npm run check`（型、Lint、Format、Vitest、サーバー/UIビルド）。S3変更時は `npm run test:storage` とComposeコンテナ再作成後の読取。ハードウェア検証はdocs/slicer.md・docs/printer.mdに記録。生成ファイル、.env、秘密、データをコミットしない。
+
+実ブラウザ変更はAPIサーバー起動後 `npm run test:e2e`。実CLI変更は `npm run test:slice -- MODEL`（実ストレージへ保存、印刷しない）。検証済みツール: Orca2.4.2/FreeCAD1.0、ARM64 Debian13。Debian12へのOrca直接導入はglibc非互換。最新の実機/ソフトウェア検証結果はdocs/verification.mdへ記録する。

@@ -1,0 +1,14 @@
+# Reproduce the ARM64 tool verification without modifying the host OS.
+FROM debian:trixie-slim
+ARG TARGETARCH
+RUN test "$TARGETARCH" = arm64
+RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+    ca-certificates curl libopengl0 libglu1-mesa libgtk-3-0t64 libwebkit2gtk-4.1-0 \
+    libmspack0 libsecret-1-0 xvfb xauth freecad-python3 \
+    && rm -rf /var/lib/apt/lists/*
+RUN curl -fL --retry 3 -o /tmp/orca.AppImage \
+    https://github.com/OrcaSlicer/OrcaSlicer/releases/download/v2.4.2/OrcaSlicer_Linux_AppImage_Ubuntu2404_aarch64_V2.4.2.AppImage \
+    && echo 'e1a07275a25f176626c55a5df39e91bc4476d8c28ee4a3192ff758e29dd5c3ba  /tmp/orca.AppImage' | sha256sum -c - \
+    && chmod +x /tmp/orca.AppImage && cd /opt && /tmp/orca.AppImage --appimage-extract >/dev/null \
+    && rm /tmp/orca.AppImage
+ENV QT_QPA_PLATFORM=offscreen

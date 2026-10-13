@@ -94,6 +94,7 @@ describe('persistent asynchronous jobs and swappable slicer', () => {
     const done = c.jobs.get(job.id);
     expect(done.state).toBe('succeeded');
     expect(c.files.metadata(done.resultFileId!).sourceModelId).toBe(f.id);
+    expect(c.repository.get('file', done.resultFileId!)).not.toHaveProperty('path');
     expect(c.adapter.startPrint).not.toHaveBeenCalled();
     expect(await readdir(join(c.dir, 'tmp'))).toEqual([]);
   });

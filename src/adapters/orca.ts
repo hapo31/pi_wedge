@@ -72,14 +72,17 @@ export class OrcaSlicerAdapter implements Slicer {
       '--outputdir',
       input.workDir,
       '--export-3mf',
-      path,
+      'result.gcode.3mf',
       input.path,
     ];
-    await this.runner.run(
+    const log = await this.runner.run(
       this.config.ORCA_XVFB ? 'xvfb-run' : this.config.ORCA_BIN,
       this.config.ORCA_XVFB ? ['-a', this.config.ORCA_BIN, ...args] : args,
       input.workDir,
     );
+    await writeFile(join(input.workDir, 'orca.log'), log.stdout + '\n' + log.stderr, {
+      mode: 0o600,
+    });
     try {
       const size = (await stat(path)).size;
       if (!size || size > this.config.MAX_ARTIFACT_MB * 1048576) throw new Error('size');

@@ -19,8 +19,16 @@ export class FreeCadConverter implements ModelConverter {
       JSON.stringify({ input: input.path, output: path, modulePath: this.modulePath, ...options }),
       { mode: 0o600 },
     );
-    await this.runner.run(this.python, [resolve('scripts/step-to-stl.py')], input.workDir, {
-      PI_WEDGE_CONVERSION_CONFIG: config,
+    const log = await this.runner.run(
+      this.python,
+      [resolve('scripts/step-to-stl.py')],
+      input.workDir,
+      {
+        PI_WEDGE_CONVERSION_CONFIG: config,
+      },
+    );
+    await writeFile(join(input.workDir, 'freecad.log'), log.stdout + '\n' + log.stderr, {
+      mode: 0o600,
     });
     const size = (await stat(path)).size;
     if (!size || size > this.maxBytes)

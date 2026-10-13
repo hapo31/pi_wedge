@@ -6,7 +6,7 @@ import { pipeline } from 'node:stream/promises';
 import { basename } from 'node:path';
 import type { ObjectStorage } from '../domain/contracts.js';
 import type { FileMetadata, SliceOptions } from '../domain/schemas.js';
-import { Uuid } from '../domain/schemas.js';
+import { Uuid, FileSchema } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
 import { Repository } from '../adapters/repository.js';
 export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
@@ -55,7 +55,7 @@ export class FileService {
   metadata(id: string) {
     const file = this.repository.get('file', Uuid.parse(id));
     if (!file) throw new AppError('file_not_found', 'File UUID does not exist', 404);
-    return file;
+    return FileSchema.parse(file);
   }
   ready(id: string) {
     const f = this.metadata(id);
@@ -101,7 +101,17 @@ export class FileService {
     if (!size || size > this.maxArtifact)
       throw new AppError('too_large', 'Slice artifact size limit exceeded', 413);
     return this.persist(
-      { id, name: `${id}.${format}`, format, size, sourceModelId, sliceOptions: options, ...stats },
+      {
+        id,
+        name: `${id}.${format}`,
+        format,
+        size,
+        sourceModelId,
+        sliceOptions: options,
+        estimatedSeconds: stats.estimatedSeconds,
+        filamentGrams: stats.filamentGrams,
+        filamentMillimeters: stats.filamentMillimeters,
+      },
       createReadStream(path),
     );
   }

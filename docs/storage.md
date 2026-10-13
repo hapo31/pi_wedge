@@ -10,3 +10,5 @@ File: id UUID、name、format(stl/step/gcode/gcode.3mf)、size、createdAt、sou
 SQLite WAL + busy_timeout + schema user_version。DBはJSON payloadを使用し、ID/レコード種別で索引。状態遷移はサービス層で制御。削除APIは初期スコープ外、管理者は停止・バックアップ後に整合性を確認して清掃。
 
 検証: `npm run test:storage` write→read→delete。`--keep`でUUIDを残し、Compose stop/rm/up後`--read UUID`で同じ値が得られることを確認。証跡はroadmapに記録。
+
+job CLIログはDATA_DIR/logsへ上限付きで保存（成功/失敗）。ログにもストレージ/プリンター資格情報を渡さない。運用時のログ保持・古いジョブ整理は管理者がバックアップ後に行う。

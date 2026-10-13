@@ -24,3 +24,26 @@ OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はロー
 ジョブ状態: queued→running→succeeded|failed。succeeded時だけresultFileIdが参照可能。エラーはcode/message、推定時間/材料は未取得時null。スライス結果本体は直接返さない。
 印刷操作: pending→accepted|failed|unknown。MQTT ACKはコマンド受付で、造形完了ではない。Idempotency-Keyは恒久保存、同一内容なら以前の結果を返し、別内容は409。pending/unknownの再送はしない。結果不明時はプリンター画面で確認してから新しい操作を判断する。
 任意設定は許可リスト（wallLoops/topShellLayers/bottomShellLayers）に限定。ユーザー定義G-code・CLIパス・任意JSON設定は受け取らない。
+
+## 使用例
+
+トークンはHTTP Authorizationヘッダーに指定する。以下の環境変数はクライアント側で設定する。
+
+```bash
+export PI_WEDGE_URL=http://raspberrypi.local:3000
+# TOKENには管理者が設定したトークン、MODEL_ID/FILE_ID/JOB_IDには各APIのUUIDを設定
+curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/profiles"
+curl -H "Authorization: Bearer $TOKEN" -F file=@model.stl "$PI_WEDGE_URL/api/files"
+curl -H "Authorization: Bearer $TOKEN" -F file=@model.step -F 'options={"layerHeight":0.2,"infillDensity":15}' "$PI_WEDGE_URL/api/slices"
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "{\"fileId\":\"$MODEL_ID\"}" "$PI_WEDGE_URL/api/slices"
+curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/slices/$JOB_ID"
+curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/files/$FILE_ID"
+curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/files/$FILE_ID/download" -o artifact.gcode.3mf
+curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/files/$FILE_ID/gcode" -o preview.gcode
+curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "{\"fileId\":\"$FILE_ID\"}" "$PI_WEDGE_URL/api/printer/upload"
+# 以下のみ加熱・機構動作を開始。ベッド/材料を確認し、操作UUIDをクライアントで保存してから実行。
+curl -H "Authorization: Bearer $TOKEN" -H "Idempotency-Key: $OPERATION_ID" -H 'Content-Type: application/json' --data "{\"fileId\":\"$FILE_ID\",\"options\":{\"bedLeveling\":true}}" "$PI_WEDGE_URL/api/printer/print"
+curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/printer/operations/$OPERATION_ID"
+```
+
+ブラウザは `/preview/$FILE_ID` を開いてトークンを入力する。JSONレスポンスのUUIDは手元に保存し、ジョブがsucceededになるまでpollする。unknownは結果を確認するまで新しいキーで再試行しない。

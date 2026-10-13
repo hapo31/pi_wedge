@@ -13,3 +13,6 @@ profiles/generated/
 .agents/
 .aws/
 .codex/
+
+playwright-report/
+test-results/

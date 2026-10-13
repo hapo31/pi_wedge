@@ -15,7 +15,7 @@ const envSchema = z.object({
   S3_SECRET_KEY: z.string().default(''),
   MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(200).default(50),
   MAX_ARTIFACT_MB: z.coerce.number().int().min(1).max(1024).default(200),
-  MAX_PREVIEW_MB: z.coerce.number().int().min(1).max(64).default(32),
+  MAX_PREVIEW_MB: z.coerce.number().int().min(1).max(32).default(32),
   SLICE_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
   MAX_QUEUED_JOBS: z.coerce.number().int().min(1).max(100).default(20),
   COMMAND_TIMEOUT_MS: z.coerce.number().int().min(1000).max(3600000).default(600000),
@@ -23,7 +23,7 @@ const envSchema = z.object({
   ORCA_XVFB: bool,
   PROFILE_DIR: z.string().default('./profiles/generated'),
   FREECAD_PYTHON: z.string().default('/usr/bin/python3'),
-  FREECAD_MODULE_PATH: z.string().default('/usr/lib/freecad/lib'),
+  FREECAD_MODULE_PATH: z.string().default('/usr/lib/freecad-python3/lib'),
   PRINTER_ENABLED: bool,
   PRINTER_HOST: z
     .string()
