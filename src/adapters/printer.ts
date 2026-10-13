@@ -2,6 +2,7 @@ import { Client as FtpClient } from 'basic-ftp';
 import { connectAsync } from 'mqtt';
 import type { MqttClient } from 'mqtt';
 import { readFile } from 'node:fs/promises';
+import type { PeerCertificate } from 'node:tls';
 import type { Printer } from '../domain/contracts.js';
 import type { FileMetadata, PrintOptions } from '../domain/schemas.js';
 import type { Config } from '../config.js';
@@ -25,6 +26,18 @@ export class BambuLanPrinter implements Printer {
     return {
       rejectUnauthorized: !this.config.PRINTER_INSECURE_TLS,
       ...(this.config.PRINTER_CA_FILE ? { ca: await readFile(this.config.PRINTER_CA_FILE) } : {}),
+      // Bambu's printer certificate identifies the device by serial in its CN,
+      // not by the LAN hostname/IP. The CA chain is still verified above.
+      ...(!this.config.PRINTER_INSECURE_TLS
+        ? {
+            checkServerIdentity: (_hostname: string, cert: PeerCertificate) =>
+              cert.subject?.CN === this.config.PRINTER_SERIAL ||
+              (Array.isArray(cert.subject?.CN) &&
+                cert.subject.CN.includes(this.config.PRINTER_SERIAL))
+                ? undefined
+                : new Error('Printer certificate serial mismatch'),
+          }
+        : {}),
     };
   }
   async upload(file: FileMetadata, path: string) {

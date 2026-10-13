@@ -6,7 +6,7 @@ FTPS（implicit TLS :990）で.gcode.3mfを転送、MQTT TLS :8883 / device/{ser
 
 Printer.uploadとPrinter.startPrintは独立、PrinterServiceはUUIDのready成果物だけを許可。通常G-codeは初期の物理印刷対象にしない。.gcode.3mfのplate_1を使用。開始時FTPS転送して最新の存在を確認（過去の転送記録だけを信用しない）。SD/cacheのURLは検証項目。
 
-PRINTER_ENABLED=falseが既定。enabled時host/serial/access codeが必須。自己署名証明書はCAファイルで信頼設定。隔離LANで検証する場合のみPRINTER_INSECURE_TLS=trueを明示。タイムアウトと接続エラーは秘密を含まないエラーコードに変換。
+PRINTER_ENABLED=falseが既定。enabled時host/serial/access codeが必須。`PRINTER_CA_FILE`にはBambu Studio公式の`resources/cert/printer.cer`など、BBL CAバンドルを指定する。プリンター証明書のCNが設定したserialと一致することも検証する。隔離LANで検証する場合のみPRINTER_INSECURE_TLS=trueを明示。タイムアウトと接続エラーは秘密を含まないエラーコードに変換。
 
 AI/管理用の印刷APIはBearer + Idempotency-Key必須。LANのブラウザ印刷はトークン入力不要で、同一Origin・確認ダイアログ・Idempotency-Key必須。どちらも同じPrinterServiceを使用する。pendingをDBへ保存してから転送/送信、sequence_id対応のACKでaccepted。publish後のタイムアウト/切断はunknownにし自動再送しない。acceptedは造形完了ではない。同じキーの再呼出しは保存した結果、内容変更は409。1台の制御は直列/同時操作拒否。plate/bed leveling/AMS mappingをPrintOptionsに用意、未対応の多色スライスは保証しない。
 
