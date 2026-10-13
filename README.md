@@ -18,9 +18,9 @@ npm run dev
 
 既定は `HOST=0.0.0.0` / ポート3000でLANから接続できる。既存の `.env` が `HOST=127.0.0.1` の場合は `HOST=0.0.0.0` に変更してサーバーを再起動する。ローカル限定の運用は `HOST=127.0.0.1` を指定する。`/health`、[Swagger](http://localhost:3000/docs)、[OpenAPI JSON](http://localhost:3000/openapi.json)。SwaggerのAuthorizeへAPI_TOKENを入力。文書/UI資産はローカル配信。
 
-同じLAN/Wi-Fiのスマホでは `http://サーバーのLAN-IP:3000/preview/{resultFileId}` を開き、API_TOKENを入力する。サーバーでAvahi等のmDNSが稼働している場合は `http://ホスト名.local:3000/preview/{resultFileId}` でも開ける（例: ホスト名 `raspberrypi` なら `raspberrypi.local`）。実際のIPは `hostname -I`、ホスト名は `hostname` で確認する。ファイアウォールを使う場合はLANからのTCP 3000を許可する。SeaweedFSのS3/管理ポートは引き続きホスト内で利用する。
+同じLAN/Wi-Fiのスマホでは `http://サーバーのLAN-IP:3000/preview/{resultFileId}` を開くだけでプレビューが表示される。サーバーでAvahi等のmDNSが稼働している場合は `http://ホスト名.local:3000/preview/{resultFileId}` でも開ける（例: ホスト名 `raspberrypi` なら `raspberrypi.local`）。実際のIPは `hostname -I`、ホスト名は `hostname` で確認する。ファイアウォールを使う場合はLANからのTCP 3000を許可する。SeaweedFSのS3/管理ポートは引き続きホスト内で利用する。
 
-`npm run check`で型/Lint/Format/43テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
+`npm run check`で型/Lint/Format/47テスト/ビルド。`npm run test:storage`で実S3確認。フロント開発は別ターミナルで`npm run dev:web`（同じAPIへproxy）。STORAGE_BACKEND=localはストレージ不要の開発用、偽スライス/偽印刷は本番へ導入しない。
 
 ## 本番
 
@@ -41,7 +41,9 @@ Orca2.4.2の公式ARM64版はglibc条件によりDebian12へ直接導入でき�
 
 ## 利用の流れ
 
-Swaggerで認証→`POST /api/slices`にSTL/STEPと設定を投入→ジョブUUIDをpoll→succeededのresultFileIdを取得→`/preview/{resultFileId}`で確認。印刷はプレビューの確認ダイアログまたは明示的なprint APIから開始する。
+AIにモデル作成を依頼→AIが認証済みAPIでSTL/STEPをスライス→完了したファイルのプレビューURLを受け取る→スマホでURLを開く→3D表示を確認して「印刷を開始」。スマホではログインやAPIトークン入力は不要。印刷開始前に確認ダイアログを表示する。
+
+`/api/*` はAI/管理用のBearer認証を維持。`/preview/{uuid}` とその配下の読取・印刷操作は信頼するLAN向けで、指定UUIDのスライス結果だけを扱う。ブラウザ印刷は同一OriginのPOSTと永続的なIdempotency-Keyが必要。
 結果不明の印刷を自動再送しない。同じIdempotency-Keyで結果を参照し、実機確認後にresolve APIを使う。[API使用例](docs/api-design.md)を参照。
 
 開発用UIは `npm run dev:web`。実ブラウザ検証はAPIサーバー起動後 `npx playwright install --with-deps chromium` と `npm run test:e2e`。ブラウザ試験は印刷APIをモックする。実スライス検証は `npm run test:slice -- model.stl model.step`（モデルと成果物を保存する）。同じDATA_DIRのサーバーを停止するか、検証専用DATA_DIRを指定して実行する。

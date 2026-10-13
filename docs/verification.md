@@ -62,3 +62,16 @@ HTTPの既定とローカル `.env` を `HOST=0.0.0.0` に変更し、標準サ�
 `http://pi5s.local:3000` と `http://192.168.11.62:3000` の両方でhealth・計量カップのプレビューページ・認証済みメタデータ/G-code取得が200、未認証のメタデータ取得が401となった。LAN IP経由の実Chromium（390×844、タッチ端末エミュレーション）で141層の3D表示、70層への切替、横にはみ出さないことを確認。JavaScriptエラーとプリンターAPI呼出しは0回。スクリーンショットと結果JSONは `.data/measuring-cup-test/preview-mobile-lan.png` / `lan-mobile.json` に保存。
 
 `npm run check` は型・Lint・Format・43テスト・サーバー/UIビルドに成功。LAN IPをbaseURLとしたPlaywrightの既存2テストも成功（印刷APIはモック）。実スマートフォンや別の物理端末からの接続は未検証。同じLANの端末ではmDNS URLを利用でき、名前解決が使えない端末はLAN IPで接続する。
+
+## AIから受け取ったURLを直接開くUI（2026-10-13）
+
+ユーザーの用途に合わせ、LANの `/preview/{uuid}` をトークン入力なしで自動表示する構成へ変更した。元モデル名を表示し、トークンフォーム・APIリンク・UUIDの目立つ表示を削除。ブラウザ用のdata/gcode/downloadは指定UUIDのreadyスライスのみ公開し、`/api/*` のBearer認証は維持する。ブラウザ印刷は同一Origin・空のPOST・永続Idempotency-Keyを検証し、既存PrinterServiceを共用する。Originなし/不一致、本文付き、無効UUID/キー、未設定プリンターを拒否する。
+
+- `npm run check`: 型・Lint・Format・全47テスト・サーバー/UIビルド成功。
+- 実ChromiumのPlaywright2テスト: 入力なしの自動表示、レイヤー操作、確認取消時0送信、確認後1送信、404と印刷無効表示が成功。印刷要求はモック。
+- 保存済み計量カップをLAN IPから390×844の実Chromiumで開き、141層の自動表示と70層への切替が成功。パスワード入力0、Authorizationヘッダー0、AI用API呼出し0、プリンターAPI呼出し0、JavaScriptエラー0、横はみ出しなし。
+- 「印刷ファイルを保存」のダウンロード名は `measuring_cup_10ml.gcode.3mf`、ダウンロード内容のSHA-256が元成果物と一致。
+- mDNS名 `pi5s.local` からdataを認証なしで取得成功。スクリーンショットと詳細JSONは `.data/measuring-cup-test/preview-simple-mobile.png` / `simple-mobile.json`（Git管理外）。
+
+検証サーバーは会話の実行セッションから独立したsystemdユーザーサービス `pi-wedge.service` で稼働している（Restart=on-failure、既存ユーザーのLinger=yes）。ビルド後は `systemctl --user restart pi-wedge.service`、状態は `systemctl --user status pi-wedge.service` で確認。この検証用ユニットはsystemd-runによる一時ユニットで、OS再起動後の自動起動は本番用unitを設置して設定する。
+実スマートフォンと実プリンターでの検証は未実施。プリンター設定は無効のままで、物理印刷は開始していない。

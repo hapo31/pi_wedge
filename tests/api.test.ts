@@ -173,7 +173,7 @@ describe('API validation and OpenAPI contract', () => {
       expect.objectContaining({ in: 'header', name: 'Idempotency-Key', required: true }),
     );
   });
-  it('starts printing only via the authenticated explicit API and exposes persisted operation', async () => {
+  it('starts printing via the authenticated agent API and exposes persisted operation', async () => {
     const c = await ctx(),
       f = await c.files.upload(new File([MODEL], 'a.stl')),
       j = c.jobs.create(f.id, SliceOptionsSchema.parse({}));

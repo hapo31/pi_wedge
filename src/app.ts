@@ -7,6 +7,7 @@ import { createRequire } from 'node:module';
 import { dirname, resolve, join } from 'node:path';
 import { readFile } from 'node:fs/promises';
 import { PreviewService } from './services/preview.js';
+import { registerPreviewRoutes } from './preview-routes.js';
 import { timingSafeEqual } from 'node:crypto';
 import { Readable } from 'node:stream';
 import type { ContentfulStatusCode } from 'hono/utils/http-status';
@@ -520,6 +521,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
         return c.text(await preview.text(c.req.valid('param').uuid), 200);
       },
     );
+    registerPreviewRoutes(app, services, preview);
   }
   const webRoot = resolve('dist/web');
   app.get('/assets/*', serveStatic({ root: webRoot }));
@@ -530,7 +532,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
       operationId: 'openPreview',
       summary: 'Open the browser preview shell',
       description:
-        'Public UI shell; file data requires a Bearer token entered in the browser. Displays paths/layers/statistics. Physical printing occurs only after the separate confirmed print action.',
+        'Trusted LAN preview: open this URL to load paths/layers/statistics automatically, without token entry. Browser data/print routes are scoped to this UUID. Physical printing occurs only after the separate confirmed same-origin print action.',
       request: { params: fileParams },
       responses: {
         200: {
@@ -565,7 +567,8 @@ export function createApp(services?: Services & { ready?: boolean }) {
   app.openAPIRegistry.registerComponent('securitySchemes', 'BearerAuth', {
     type: 'http',
     scheme: 'bearer',
-    description: 'Administrator API_TOKEN. Required for all data and printer operations.',
+    description:
+      'Administrator API_TOKEN. Required for /api/* agent and administration operations. The trusted LAN browser preview uses /preview/* without token entry.',
   });
   const documentConfig = {
     openapi: '3.1.0',

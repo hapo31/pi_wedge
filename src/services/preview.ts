@@ -11,10 +11,21 @@ export class PreviewService {
     private dataDir: string,
     private maxBytes: number,
   ) {}
-  async text(id: string) {
+  file(id: string) {
     const file = this.files.ready(id);
     if (file.format !== 'gcode' && file.format !== 'gcode.3mf')
       throw new AppError('wrong_kind', 'Preview requires a G-code slice result UUID', 409);
+    return { ...file, format: file.format };
+  }
+  details(id: string) {
+    const file = this.file(id);
+    return {
+      file,
+      displayName: file.sourceModelId ? this.files.metadata(file.sourceModelId).name : file.name,
+    };
+  }
+  async text(id: string) {
+    const file = this.file(id);
     if (this.active >= 2)
       throw new AppError('preview_busy', 'Two previews are already being processed', 503);
     this.active++;

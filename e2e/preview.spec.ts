@@ -1,39 +1,40 @@
 import { test, expect } from '@playwright/test';
-import { GCODE, TOKEN } from '../tests/helpers.js';
+import { GCODE } from '../tests/helpers.js';
 const id = '0198cdf0-b8f1-4de0-8d67-2d9e95ed019c';
 test('WebGL layers, stats, confirmation and one explicit print request', async ({ page }) => {
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   let prints = 0;
-  await page.route('**/api/**', async (route) => {
+  await page.route('**/preview/*/*', async (route) => {
     const path = new URL(route.request().url()).pathname;
     if (path.endsWith('/gcode')) return route.fulfill({ contentType: 'text/plain', body: GCODE });
-    if (path === '/api/ready')
-      return route.fulfill({ json: { status: 'ready', printerEnabled: true } });
-    if (path === '/api/printer/print') {
+    if (path === `/preview/${id}/print`) {
       prints++;
-      const body = route.request().postDataJSON();
-      expect(body.fileId).toBe(id);
       expect(route.request().headers()['idempotency-key']).toMatch(/^[\da-f-]{36}$/);
+      expect(route.request().headers().authorization).toBeUndefined();
+      expect(route.request().headers().origin).toBe(new URL(page.url()).origin);
       return route.fulfill({
         json: { id: route.request().headers()['idempotency-key'], state: 'accepted', error: null },
       });
     }
     return route.fulfill({
       json: {
-        id,
-        name: 'cube.gcode.3mf',
-        format: 'gcode.3mf',
-        state: 'ready',
-        estimatedSeconds: 62,
-        filamentGrams: 1.2,
-        filamentMillimeters: 340,
+        displayName: 'cube.stl',
+        printerEnabled: true,
+        file: {
+          id,
+          name: 'cube.gcode.3mf',
+          format: 'gcode.3mf',
+          state: 'ready',
+          estimatedSeconds: 62,
+          filamentGrams: 1.2,
+          filamentMillimeters: 340,
+        },
       },
     });
   });
   await page.goto(`/preview/${id}`);
-  await page.getByLabel('APIトークン', { exact: true }).fill(TOKEN);
-  await page.getByRole('button', { name: 'プレビューを開く' }).click();
+  await expect(page.getByLabel('APIトークン', { exact: true })).toHaveCount(0);
   await expect(page.getByRole('slider', { name: 'レイヤー', exact: true })).toBeEnabled({
     timeout: 20000,
   });
@@ -61,15 +62,13 @@ test('WebGL layers, stats, confirmation and one explicit print request', async (
   );
 });
 test('shows a missing file clearly and never enables print', async ({ page }) => {
-  await page.route('**/api/**', (route) =>
+  await page.route('**/preview/*/*', (route) =>
     route.fulfill({
       status: 404,
       json: { error: { code: 'file_not_found', message: 'not found' } },
     }),
   );
   await page.goto(`/preview/${id}`);
-  await page.getByLabel('APIトークン', { exact: true }).fill(TOKEN);
-  await page.getByRole('button', { name: 'プレビューを開く' }).click();
   await expect(page.getByRole('alert')).toHaveText('指定されたファイルが見つかりません。');
   await expect(page.getByRole('button', { name: '印刷を開始', exact: true })).toBeDisabled();
 });

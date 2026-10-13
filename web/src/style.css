@@ -81,12 +81,6 @@ input:focus-visible {
 .dot.active {
   background: #4bd5bc;
 }
-.api-link {
-  font-size: 12px;
-  color: #9cafbe;
-  border-left: 1px solid #26313e;
-  padding-left: 24px;
-}
 .workspace {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 318px;
@@ -212,24 +206,12 @@ input[type='range'] {
   align-self: flex-start;
   letter-spacing: 0.6px;
 }
-.uuid-block {
-  border-bottom: 1px solid #26313e;
-  padding: 5px 0 24px;
-}
-.uuid-block span,
 .stats span,
 .machine-card > span {
   font-size: 11px;
   color: #8398ac;
   display: block;
   margin-bottom: 8px;
-}
-.uuid-block code {
-  display: block;
-  font-size: 11px;
-  color: #8fa4b6;
-  line-height: 1.7;
-  overflow-wrap: anywhere;
 }
 .stats {
   display: grid;
@@ -269,8 +251,7 @@ input[type='range'] {
   color: #8ea2b6;
   line-height: 1.8;
 }
-.print-button,
-.primary {
+.print-button {
   background: #4bd5bc;
   color: #0b2926;
   padding: 14px 16px;
@@ -279,8 +260,7 @@ input[type='range'] {
   width: 100%;
   font-size: 13px;
 }
-.print-button:hover:enabled,
-.primary:hover {
+.print-button:hover:enabled {
   background: #6ee4cf;
 }
 .print-panel small {
@@ -307,11 +287,6 @@ input[type='range'] {
   color: #98b0c4;
   font-size: 11px;
 }
-.text-button {
-  background: transparent;
-  color: #768ea5;
-  font-size: 11px;
-}
 .empty-view {
   min-height: 610px;
   height: 100%;
@@ -336,32 +311,6 @@ input[type='range'] {
 .empty-view p {
   color: #8ea4b6;
   font-size: 13px;
-}
-.auth-form {
-  display: flex;
-  flex-direction: column;
-  gap: 12px;
-  text-align: left;
-  width: min(340px, 100%);
-  margin-top: 25px;
-}
-.auth-form label {
-  font-size: 12px;
-  color: #9aafc0;
-}
-.auth-form input {
-  background: #0c1721;
-  border: 1px solid #3a4e60;
-  border-radius: 6px;
-  padding: 13px;
-  color: #dfe8ef;
-  width: 100%;
-  font-size: 12px;
-}
-.auth-form small {
-  font-size: 10px;
-  color: #70889d;
-  text-align: center;
 }
 .viewport-message {
   position: absolute;
@@ -463,8 +412,5 @@ footer span {
   }
   .connection {
     font-size: 10px;
-  }
-  .api-link {
-    padding-left: 12px;
   }
 }

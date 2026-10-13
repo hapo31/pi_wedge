@@ -12,6 +12,11 @@ export type Operation = {
   state: 'pending' | 'accepted' | 'failed' | 'unknown';
   error: { code: string; message: string } | null;
 };
+export type PreviewData = {
+  file: Metadata;
+  displayName: string;
+  printerEnabled: boolean;
+};
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -21,11 +26,8 @@ export class ApiError extends Error {
     super(message);
   }
 }
-export async function fetchApi(path: string, token: string, init: RequestInit = {}) {
-  const response = await fetch(path, {
-    ...init,
-    headers: { ...init.headers, Authorization: `Bearer ${token}` },
-  });
+export async function fetchPreview(path: string, init: RequestInit = {}) {
+  const response = await fetch(path, init);
   if (!response.ok) {
     const body = await response.json().catch(() => null);
     throw new ApiError(
@@ -39,8 +41,8 @@ export async function fetchApi(path: string, token: string, init: RequestInit = 
 export function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     switch (error.status) {
-      case 401:
-        return 'APIトークンを確認してください。';
+      case 403:
+        return 'プレビューページを開き直して操作してください。';
       case 404:
         return '指定されたファイルが見つかりません。';
       case 413:

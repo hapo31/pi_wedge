@@ -8,7 +8,7 @@ Printer.uploadとPrinter.startPrintは独立、PrinterServiceはUUIDのready成�
 
 PRINTER_ENABLED=falseが既定。enabled時host/serial/access codeが必須。自己署名証明書はCAファイルで信頼設定。隔離LANで検証する場合のみPRINTER_INSECURE_TLS=trueを明示。タイムアウトと接続エラーは秘密を含まないエラーコードに変換。
 
-印刷はBearer + Idempotency-Key必須。pendingをDBへ保存してから転送/送信、sequence_id対応のACKでaccepted。publish後のタイムアウト/切断はunknownにし自動再送しない。acceptedは造形完了ではない。同じキーの再呼出しは保存した結果、内容変更は409。1台の制御は直列/同時操作拒否。plate/bed leveling/AMS mappingをPrintOptionsに用意、未対応の多色スライスは保証しない。
+AI/管理用の印刷APIはBearer + Idempotency-Key必須。LANのブラウザ印刷はトークン入力不要で、同一Origin・確認ダイアログ・Idempotency-Key必須。どちらも同じPrinterServiceを使用する。pendingをDBへ保存してから転送/送信、sequence_id対応のACKでaccepted。publish後のタイムアウト/切断はunknownにし自動再送しない。acceptedは造形完了ではない。同じキーの再呼出しは保存した結果、内容変更は409。1台の制御は直列/同時操作拒否。plate/bed leveling/AMS mappingをPrintOptionsに用意、未対応の多色スライスは保証しない。
 
 ## 実機検証（未実施なら未検証と表示）
 

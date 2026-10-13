@@ -4,7 +4,9 @@ React + TypeScript、Three.jsベースの[gcode-preview](https://github.com/xyz-
 
 `/preview/{uuid}`: 大きな3D viewport、右側ファイル名/UUID/推定時間/材料/接続状態、下部レイヤースライダー。180×180×180mm build volume、回転/ズーム/pan、単一レイヤー/積層表示、travel toggle。印刷は別の目立つボタン→ネイティブ確認ダイアログ→API、実行中disable、恒久冪等キー使用。unknownは成功と表示しない。
 
-APIトークンは画面で入力、Reactメモリだけに保持しURL/localStorageへ保存しない。Swaggerの認証と独立。401/404/422/413を日本語で表示。
+AIから受け取った `/preview/{uuid}` を開くだけで、元モデル名・統計・3Dツールパスを自動表示する。トークン入力、APIリンク、UUIDの目立つ表示を省き、スマホで確認して印刷開始する用途に絞る。UIにAPI_TOKENを埋め込まず、データは専用の `/preview/{uuid}/data`・`gcode`・`download` から取得。元モデル本体や一覧は公開しない。403/404/422/413を日本語で表示。
+
+「印刷を開始」は確認後に空のPOSTを `/preview/{uuid}/print` へ送信。同一OriginとIdempotency-Keyをサーバーで検証し、認証済みAI APIと同じPrinterServiceを使用する。Originがない/一致しない要求は403、CORSは許可しない。これは信頼するLANでの運用を前提とする。
 
 スマホからは同じLANの `http://ホスト名.local:3000/preview/{uuid}`（mDNS稼働時）または `http://LAN-IP:3000/preview/{uuid}` を使う。APIサーバーの既定待ち受けは `HOST=0.0.0.0`。APIのURLは相対パスなのでアクセスしたホスト名/IPのままデータを取得できる。Viteの開発サーバーを起動せず、ビルド済みUIをAPIサーバーから配信する構成で利用可能。
 

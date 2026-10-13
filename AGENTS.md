@@ -10,7 +10,7 @@ Raspberry Pi 5 8GB / ARM64 のLAN内でA1 mini用モデルをスライスし、U
 - HTTPハンドラーでCLI、S3、FTPS、MQTTを直接操作しない。Slicer / ModelConverter / ObjectStorage / Printerのインターフェース経由。
 - SQLiteにメタデータ・ジョブ・印刷操作を永続化。ファイル本体はストレージ経由。UUIDをオブジェクトキーに使用し、クライアントのパスは受け取らない。
 - 初期実装は単一サーバープロセス。Piのメモリを守るため同時スライス数は1。キューに上限。
-- 印刷開始を他のAPIから暗黙的に呼ばない。認証・永続的冪等キーを必須にする。結果不明のMQTT操作を自動再送しない。
+- 印刷開始を読取・スライスから暗黙的に呼ばない。AI/管理用 `/api/*` はBearer認証必須。信頼するLANの `/preview/{uuid}` はトークン入力なしで開ける。ブラウザ印刷は同一Originの明示的POST・永続的冪等キー・確認ダイアログを必須にする。結果不明のMQTT操作を自動再送しない。
 - MCPは未実装。サービス層をHTTPから独立させ将来の入口を追加可能にする。
 - ARM64にないバイナリを必須依存にしない。実機依存の結果をモック結果と混同しない。
 
@@ -18,6 +18,7 @@ Raspberry Pi 5 8GB / ARM64 のLAN内でA1 mini用モデルをスライスし、U
 
 TypeScript strict / noUncheckedIndexedAccess、ESM、2スペース、Prettier。外部入力はZodで検証。UUID、形式、サイズ、数値範囲、未知キーを検証。CLIはspawn(shell:false)と固定の引数配列、タイムアウト、上限付きログ、一時領域のfinally清掃を使用。秘密をログ・例外・URLに出さない。
 OpenAPI 3.1は実行時スキーマと共有し、operationId、例、エラー、非同期状態、物理副作用を記述。変更時は整合性テスト・docs/api-design.mdを更新。
+ブラウザ用HTTPは `src/preview-routes.ts`。公開するデータは指定UUIDのreadyスライス結果だけ。モデル本体・一覧・設定・API_TOKENは公開しない。印刷はOriginなし/不一致を403、リクエスト本体なし、CORS許可なし。UIにAPI_TOKENを埋め込まない。
 
 ## ストレージ・スライサー
 
