@@ -25,7 +25,7 @@
 
 実装: LAN内の `/history` とページ分割・名前検索に対応した `/history/data`、プレビューからの導線、`POST /api/slices` の任意の名前を追加。履歴はready結果だけを扱い、既存結果は元モデル名へフォールバックする。認証なしの公開範囲は開発規約に記録した。
 
-検証: SQLiteの複数ページ・名前省略時の表示・入力拒否・OpenAPIを含む `npm run check` で70テスト通過。実Chromiumの `npm run test:e2e` は履歴画面を含む6テスト通過。実機のスライスと印刷はこの変更の検証に含めない。詳細は[検証記録](verification.md)。
+検証: SQLiteの複数ページ・名前省略時の表示・入力拒否・OpenAPIを含む `npm run check` で70テスト通過。実Chromiumの `npm run test:e2e` は履歴画面を含む6テスト通過。稼働サービスへ反映して保存済み結果の一覧と検索を確認。実機のスライスと印刷はこの変更の検証に含めない。詳細は[検証記録](verification.md)。
 
 ## フェーズ0検証結果
 
