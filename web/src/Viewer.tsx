@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react';
 import { init } from 'gcode-preview';
-import { previewInput } from './preview-input.js';
+import { fitToolpath, parseToolpath, renderToolpath } from './toolpath.js';
 import type { WebGLPreview } from 'gcode-preview';
 import type { LineSegments, Material, LineBasicMaterial } from 'three';
 const TRAVEL = '#526373';
@@ -37,16 +37,16 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
     const abort = new AbortController();
     let instance: WebGLPreview | null = null;
     let observer: ResizeObserver | undefined;
+    let disposeToolpath: (() => void) | undefined;
+    let rendered = false;
     onReady(false);
     setLoading(true);
     setError('');
+    setProgress(0);
+    setCount(0);
+    setHeights([]);
     void (async () => {
       try {
-        const lines = previewInput(text).split('\n');
-        if (lines.length > 250000)
-          throw new PreviewError(
-            '行数がプレビューの上限を超えています。ダウンロードして確認してください。',
-          );
         instance = init({
           canvas: element,
           buildVolume: { x: 180, y: 180, z: 180 },
@@ -61,31 +61,31 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
           initialCameraPosition: [250, 220, 250],
         });
         preview.current = instance;
-        observer = new ResizeObserver(() => instance?.resize());
+        observer = new ResizeObserver(() => {
+          if (!instance) return;
+          instance.resize();
+          instance.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
+          if (rendered) fitToolpath(instance);
+        });
         observer.observe(element.parentElement!);
         instance.resize();
         instance.renderer.setPixelRatio(Math.min(window.devicePixelRatio, 2));
-        for (let i = 0; i < lines.length; i += 1000) {
-          abort.signal.throwIfAborted();
-          instance.parser.parseGCode(lines.slice(i, i + 1000));
-          instance.parser.lines = [];
-          setProgress(Math.round((Math.min(i + 1000, lines.length) / lines.length) * 70));
-          await new Promise<void>((r) => requestAnimationFrame(() => r()));
-        }
+        await parseToolpath(instance, text, abort.signal, (fraction) =>
+          setProgress(Math.round(fraction * 70)),
+        );
         const layers = instance.parser.layers;
         if (!layers.length) throw new PreviewError('表示できるツールパスがありません。');
-        if (layers.some((l) => l.commands.length > 20000))
-          throw new PreviewError(
-            'レイヤーのパスが上限を超えています。ダウンロードして確認してください。',
-          );
         setCount(layers.length);
         setLayer(layers.length);
         let z = 0;
         setHeights(layers.map((layer) => (z += layer.height)));
-        setProgress(85);
-        await instance.renderAnimated(1);
+        disposeToolpath = await renderToolpath(instance, abort.signal, (fraction) =>
+          setProgress(70 + Math.round(fraction * 30)),
+        );
         abort.signal.throwIfAborted();
         setVisibility(instance, layers.length, false, false);
+        fitToolpath(instance);
+        rendered = true;
         setProgress(100);
         setLoading(false);
         onReady(true);
@@ -98,6 +98,8 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
           );
           setLoading(false);
           onReady(false);
+          disposeToolpath?.();
+          observer?.disconnect();
           instance?.dispose();
           preview.current = null;
         }
@@ -106,6 +108,7 @@ export function Viewer({ text, onReady }: { text: string; onReady: (ready: boole
     return () => {
       abort.abort();
       observer?.disconnect();
+      disposeToolpath?.();
       if (instance) {
         instance.parser.layers = [];
         instance.parser.preamble.commands = [];

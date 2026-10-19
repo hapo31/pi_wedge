@@ -32,7 +32,7 @@ export class JobService {
     )
       throw new AppError('queue_full', 'Slice queue is full', 409);
   }
-  create(modelId: string, options: SliceOptions): SliceJob {
+  create(modelId: string, options: SliceOptions, name?: string): SliceJob {
     this.assertCapacity();
     const f = this.files.ready(modelId);
     if (f.format !== 'stl' && f.format !== 'step')
@@ -40,6 +40,7 @@ export class JobService {
     const job = {
       id: randomUUID(),
       modelId,
+      ...(name ? { name } : {}),
       options,
       state: 'queued' as const,
       createdAt: new Date().toISOString(),
@@ -88,6 +89,7 @@ export class JobService {
         job.options,
         result,
         result.format,
+        job.name,
       );
       job.resultFileId = artifact.id;
       job.state = 'succeeded';

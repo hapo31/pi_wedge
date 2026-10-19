@@ -82,6 +82,14 @@ export async function setup(
   };
   const adapter: Printer = overrides.printer ?? {
     upload: vi.fn(async (file) => ({ remotePath: `/${file.id}.gcode.3mf` })),
+    readStatus: vi.fn(async () => ({
+      observedAt: new Date().toISOString(),
+      gcodeState: 'IDLE',
+      amsConnected: false,
+      currentSlot: null,
+      externalSpoolActive: false,
+      slots: [],
+    })),
     startPrint: vi.fn(async () => {}),
     stopPrint: vi.fn(async () => {}),
   };

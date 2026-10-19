@@ -1,12 +1,34 @@
 import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Printer } from '../domain/contracts.js';
-import type { PrintOptions, PrintOperation, StopPrintOperation } from '../domain/schemas.js';
+import type {
+  PrintOptions,
+  PrintOperation,
+  StopPrintOperation,
+  PrinterStatus,
+} from '../domain/schemas.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
 import { FileService } from './files.js';
 export class PrinterService {
   private busy = false;
+  private snapshot: PrinterStatus | null = null;
+  private statusRequest: Promise<PrinterStatus> | null = null;
+  async status(fresh = false): Promise<PrinterStatus> {
+    if (!fresh && this.snapshot && Date.now() - Date.parse(this.snapshot.observedAt) < 5000)
+      return this.snapshot;
+    if (this.statusRequest) return this.statusRequest;
+    this.statusRequest = this.printer
+      .readStatus()
+      .then((status) => {
+        this.snapshot = status;
+        return status;
+      })
+      .finally(() => {
+        this.statusRequest = null;
+      });
+    return this.statusRequest;
+  }
   constructor(
     private files: FileService,
     private printer: Printer,
@@ -110,6 +132,22 @@ export class PrinterService {
     this.files.repository.insert('operation', operation);
     let dispatched = false;
     try {
+      if (options.useAms) {
+        const status = await this.status(true),
+          slot = status.slots.find((s) => s.slot === options.amsMapping?.[0]);
+        if (status.amsConnected !== true || slot?.present !== true)
+          throw new AppError(
+            'ams_slot_unavailable',
+            'Selected AMS slot is empty or its state is unknown',
+            409,
+          );
+        if (slot.material && slot.material.toUpperCase() !== 'PLA')
+          throw new AppError(
+            'ams_material_mismatch',
+            'Selected AMS material does not match the Generic PLA slice',
+            409,
+          );
+      }
       await this.withFile(fileId, async (path) => {
         const { remotePath } = await this.printer.upload(file, path);
         dispatched = true;

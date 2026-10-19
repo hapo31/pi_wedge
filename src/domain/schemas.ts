@@ -2,6 +2,18 @@ import { z } from '@hono/zod-openapi';
 export const Uuid = z.string().uuid().openapi({ example: '0198cdf0-b8f1-4de0-8d67-2d9e95ed019c' });
 export const ErrorInfo = z.object({ code: z.string(), message: z.string() });
 export const ErrorResponse = z.object({ error: ErrorInfo }).openapi('ErrorResponse');
+export const SliceNameSchema = z
+  .string()
+  .trim()
+  .min(1)
+  .max(80)
+  .refine(
+    (name) =>
+      ![...name].some(
+        (character) => character.charCodeAt(0) < 32 || character.charCodeAt(0) === 127,
+      ),
+    'Control characters are not allowed',
+  );
 export const SliceOptionsSchema = z
   .object({
     printerProfile: z.literal('a1-mini-0.4').default('a1-mini-0.4'),
@@ -32,6 +44,7 @@ export const FileSchema = z
   .object({
     id: Uuid,
     name: z.string(),
+    displayName: SliceNameSchema.optional(),
     format: z.enum(['stl', 'step', 'gcode', 'gcode.3mf']),
     size: z.number().int().nonnegative(),
     createdAt: z.string().datetime(),
@@ -49,6 +62,7 @@ export const JobSchema = z
   .object({
     id: Uuid,
     modelId: Uuid,
+    name: SliceNameSchema.optional(),
     options: SliceOptionsSchema,
     state: z.enum(['queued', 'running', 'succeeded', 'failed']),
     createdAt: z.string().datetime(),
@@ -59,6 +73,22 @@ export const JobSchema = z
   })
   .openapi('SliceJob');
 export type SliceJob = z.infer<typeof JobSchema>;
+export const HistoryItemSchema = z
+  .object({
+    id: Uuid,
+    name: z.string(),
+    createdAt: z.string().datetime(),
+    format: z.enum(['gcode', 'gcode.3mf']),
+    estimatedSeconds: z.number().nonnegative().nullable(),
+    filamentGrams: z.number().nonnegative().nullable(),
+  })
+  .openapi('SliceHistoryItem');
+export const HistoryResponseSchema = z
+  .object({
+    items: z.array(HistoryItemSchema),
+    nextCursor: Uuid.nullable(),
+  })
+  .openapi('SliceHistoryPage');
 export const PrintOptionsSchema = z
   .object({
     plate: z.literal(1).default(1),
@@ -67,7 +97,9 @@ export const PrintOptionsSchema = z
     vibrationCalibration: z.boolean().default(false),
     timelapse: z.boolean().default(false),
     useAms: z.boolean().default(false),
-    amsMapping: z.array(z.number().int().min(-1).max(3)).max(1).optional(),
+    amsMapping: z.array(z.number().int().min(0).max(3)).max(1).optional().openapi({
+      description: 'Single-filament AMS Lite slot, zero-based (0–3). Required when useAms is true.',
+    }),
   })
   .strict()
   .superRefine((v, c) => {
@@ -117,3 +149,43 @@ export type StopPrintOperation = z.infer<typeof StopOperationSchema>;
 export const PrinterOperationSchema = z
   .union([OperationSchema, StopOperationSchema])
   .openapi('PrinterOperation');
+
+export const PrinterStatusSchema = z
+  .object({
+    observedAt: z.string().datetime(),
+    gcodeState: z.string().max(40).nullable(),
+    amsConnected: z.boolean().nullable(),
+    currentSlot: z.number().int().min(0).max(3).nullable(),
+    externalSpoolActive: z.boolean().nullable(),
+    slots: z
+      .array(
+        z.object({
+          slot: z.number().int().min(0).max(3),
+          present: z.boolean().nullable(),
+          material: z.string().max(40).nullable(),
+          color: z
+            .string()
+            .regex(/^#[0-9A-F]{6}$/)
+            .nullable(),
+          remainingPercent: z.number().int().min(0).max(100).nullable(),
+          active: z.boolean(),
+        }),
+      )
+      .max(4),
+  })
+  .openapi('PrinterStatus');
+export type PrinterStatus = z.infer<typeof PrinterStatusSchema>;
+export const BrowserPrintSchema = z
+  .object({
+    useAms: z.boolean().default(false),
+    amsMapping: z.array(z.number().int().min(0).max(3)).length(1).optional(),
+  })
+  .strict()
+  .superRefine((v, c) => {
+    if (v.useAms !== Boolean(v.amsMapping))
+      c.addIssue({
+        code: 'custom',
+        message: 'AMS use requires exactly one slot; external spool must omit amsMapping',
+      });
+  })
+  .openapi('BrowserPrintSettings');

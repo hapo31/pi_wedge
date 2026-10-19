@@ -1,5 +1,5 @@
 import { ApiError, errorMessage } from './api.js';
-import type { Operation } from './api.js';
+import type { Operation, BrowserPrintSettings } from './api.js';
 export type PrintState = {
   busy: boolean;
   operation: Operation | null;
@@ -15,22 +15,101 @@ function createUuid() {
 }
 export class PrintController {
   private state: PrintState = { busy: false, operation: null, message: '', key: null };
-  private fingerprint = '';
+  private settings: BrowserPrintSettings = { useAms: false };
   constructor(
-    private send: (fileId: string, key: string) => Promise<Operation>,
+    private send: (
+      fileId: string,
+      key: string,
+      settings: BrowserPrintSettings,
+    ) => Promise<Operation>,
     private update: (state: PrintState) => void,
-    private confirm: () => boolean,
+    private confirm: (settings: BrowserPrintSettings, message?: string) => boolean,
   ) {}
-  async start(fileId: string) {
-    if (this.state.busy || this.state.operation?.state === 'accepted') return;
-    if (!this.confirm()) return;
-    const fingerprint = fileId;
-    const key = this.fingerprint === fingerprint && this.state.key ? this.state.key : createUuid();
-    this.fingerprint = fingerprint;
-    this.state = { ...this.state, busy: true, message: '印刷要求を送信中…', key };
+  restore(fileId: string) {
+    this.state = { busy: false, operation: null, message: '', key: null };
+    this.settings = { useAms: false };
+    if (typeof window !== 'undefined') {
+      try {
+        const raw = window.localStorage.getItem(`pi_wedge:print:${fileId}`);
+        if (raw) {
+          const saved = JSON.parse(raw);
+          if (
+            !/^[0-9a-f-]{36}$/i.test(saved.key) ||
+            typeof saved.settings?.useAms !== 'boolean' ||
+            (saved.settings.useAms &&
+              (!Array.isArray(saved.settings.amsMapping) ||
+                saved.settings.amsMapping.length !== 1 ||
+                !Number.isInteger(saved.settings.amsMapping[0]) ||
+                saved.settings.amsMapping[0] < 0 ||
+                saved.settings.amsMapping[0] > 3))
+          )
+            throw new Error('Invalid saved request');
+          this.settings = saved.settings;
+          this.state.key = saved.key;
+          this.state.operation = saved.operation ?? null;
+          this.state.message =
+            this.state.operation?.state === 'accepted'
+              ? '印刷開始の要求を受け付けました。'
+              : this.state.operation?.state === 'unknown'
+                ? '結果が不明です。プリンターの画面を確認してください。'
+                : this.state.operation?.state === 'failed'
+                  ? '前回の印刷要求は失敗しました。'
+                  : '前回の印刷要求の結果を確認してください。';
+        }
+      } catch {
+        this.state.message =
+          '保存した印刷要求を読み込めません。プリンターの画面を確認してください。';
+        this.state.operation = { id: '', state: 'unknown', error: null };
+      }
+    }
+    this.update({ ...this.state });
+    return this.settings;
+  }
+  private persist(fileId: string) {
+    if (typeof window !== 'undefined')
+      window.localStorage.setItem(
+        `pi_wedge:print:${fileId}`,
+        JSON.stringify({
+          key: this.state.key,
+          settings: this.settings,
+          operation: this.state.operation,
+        }),
+      );
+  }
+  async start(
+    fileId: string,
+    settings: BrowserPrintSettings = { useAms: false },
+    message?: string,
+  ) {
+    if (this.state.busy || ['accepted', 'unknown'].includes(this.state.operation?.state ?? ''))
+      return;
+    const unresolved =
+      this.state.key && (!this.state.operation || this.state.operation.state === 'pending');
+    const request = unresolved
+      ? this.settings
+      : {
+          useAms: settings.useAms,
+          ...(settings.useAms ? { amsMapping: [...(settings.amsMapping ?? [])] } : {}),
+        };
+    if (!this.confirm(request, message)) return;
+    if (!unresolved) {
+      this.settings = request;
+      this.state.key = createUuid();
+      this.state.operation = null;
+    }
+    try {
+      // Save the exact request before dispatch; lost responses and page reloads reuse it.
+      this.persist(fileId);
+    } catch {
+      this.state.message =
+        '印刷要求をブラウザーに保存できません。保存を許可して開き直してください。';
+      this.update({ ...this.state });
+      return;
+    }
+    this.state = { ...this.state, busy: true, message: '印刷要求を送信中…' };
     this.update({ ...this.state });
     try {
-      const operation = await this.send(fileId, key);
+      const operation = await this.send(fileId, this.state.key!, this.settings);
       this.state.operation = operation;
       this.state.message =
         operation.state === 'accepted'
@@ -49,6 +128,11 @@ export class PrintController {
           : '通信に失敗しました。プリンターを確認し、「結果を確認」を押してください。';
     } finally {
       this.state.busy = false;
+      try {
+        this.persist(fileId);
+      } catch {
+        /* The pre-dispatch key is already stored. */
+      }
       this.update({ ...this.state });
     }
   }

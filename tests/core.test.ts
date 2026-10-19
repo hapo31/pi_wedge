@@ -209,6 +209,14 @@ describe('printer orchestration and persistent idempotency', () => {
           startPrint: vi
             .fn()
             .mockRejectedValue(new AppError('printer_outcome_unknown', 'Unknown dispatch', 504)),
+          readStatus: vi.fn(async () => ({
+            observedAt: new Date().toISOString(),
+            gcodeState: 'IDLE',
+            amsConnected: false,
+            currentSlot: null,
+            externalSpoolActive: false,
+            slots: [],
+          })),
           stopPrint: vi.fn(async () => {}),
         },
       }),

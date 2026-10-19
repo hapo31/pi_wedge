@@ -1,4 +1,4 @@
-# 検証記録（2026-10-14）
+# 検証記録（2026-10-19）
 
 ## 実行環境と結果
 
@@ -133,3 +133,42 @@ HTTPの既定とローカル `.env` を `HOST=0.0.0.0` に変更し、標準サ�
 - 再起動後も以前の開始操作`9b07689a-2272-4423-aa94-de1276ca1090`はacceptedのまま照会でき、サービスはactive。
 
 停止エンドポイント経由の実機キャンセルは未検証。前節の停止成功は診断用の直接MQTTによるもの。UI・CLI・S3は変更していない。
+
+## AMS Lite状態表示と供給設定UI（2026-10-14）
+
+計画は状態取得の抽象化、認証付き/UUID限定API、印刷ボタン上の状態と供給設定、確認内容と冪等性、Swagger案内、ソフトウェアと実機読取の検証の順で整理して実施した。
+
+- `npm run check`: 型・Lint・Format・63テスト・サーバー/UIビルド成功。新規6件で実A1 mini形式のAMS正規化、MQTT読取のみ、アクセス制御、読取の共有、AMS mapping/空スロット/材料不一致の拒否、応答不達後のキーと設定保持を確認した。
+- Playwright4件成功。4スロットの表示、空/PETGスロットの選択不可、選択したスロット2の材料/色を確認文とJSONへ反映、確認取消時0送信、確定時1送信、再読込で設定維持、404、unknown操作の無効化、更新後にAMS切断した場合の開始不可、390px幅の横はみ出しなしを確認。プリンター無効の一時DATA_DIRを使う127.0.0.1:3001で実行し、印刷APIはモック。
+- 環境: `PLAYWRIGHT_BROWSERS_PATH=/tmp/pi-wedge-browsers` と既存の `/tmp/pi-wedge-copy-browser-deps/extracted/usr/lib/aarch64-linux-gnu` を使用。既存test-resultsの書込み権限を変更せず `--output=/tmp/pi-wedge-ams-e2e-20261014` に保存。
+- 新しいBambuLanPrinter.readStatusを実機で確認。AMS Lite接続、スロット0にPLA/RGB `#F72323`、他の3スロットは空、tray_now 254（外部スプール使用）を取得。残量100はプリンター報告値として保持し、実測値とは扱わない。
+- pending印刷/停止要求が0件と確認した後、user service `pi-wedge.service` を再起動して適用。readiness、認証付き`GET /api/printer/status`、保存済みモデルの`GET /preview/{uuid}/printer`がHTTP200、サービスactive、SwaggerにAI実行前の設定提示/ユーザー確認推奨があることを確認。開始APIの過去の結果と実行中ジョブを変更する操作は行っていない。
+- 実稼働モデルをChromiumの390×844で表示。AMS表示、外部スプール選択、PLAスロット1の選択可/空スロット2の選択不可、JavaScriptエラー0、印刷要求0、横はみ出しなしを確認。画像は `/tmp/pi-wedge-ams-preview-live.png`。
+
+AMS供給設定は今回の単色スライスで使う供給元/スロットの選択。AMS内の材料登録とスライス済み温度の変更は対象に含めない。AMSを選択した新規要求は送信前に装填と既知の材料を再確認する。新UIからAMS経由の実造形・供給切替・仕上がりの検証は未実施。
+
+## 大きなプレビューの全体表示（2026-10-15）
+
+対象UUID `e14cc9db-78ed-46c7-aa1c-017bd9220a0f`（shell_front.stl）のブラウザ用G-code APIは413 / `Preview exceeds 250,000 lines`を返していた。成果物を読取専用で取得し、展開後10,427,078bytes（9.94MiB）/473,996行/540レイヤーと確認。25万行とレイヤー内2万コマンドの閾値を限界値とする測定記録はなかった。総行数・レイヤー内コマンド数での拒否を削除し、解析/描画を分割、完了した解析コマンドと描画リソースを解放する実装へ変更した。展開容量32MiB・1行長・ZIP検証は維持。初期視点とviewportサイズ変更時に全体を収めるカメラ調整も追加した。
+
+- `npm run check`: 型・Lint・Format・66テスト・サーバー/UIビルド成功。200万行を超える通常G-code/3MFを公開/認証付きAPIで末尾まで返すこと、入力を最大1,000行ずつ走査すること、デスクトップ/縦長画面で高いモデルの全頂点が画面内に収まることを確認。
+- `npm run test:e2e`: ARM64 Chromium156で5件成功。288,000本の押出コマンドを持つ12層（各24,000コマンド）を末尾まで描画し、最後/最初のレイヤー切替と移動経路を確認。既存のAMS設定・確認・冪等性・404・結果不明の検証も成功。APIはfixtureで、印刷開始はモック。
+- 対象実ファイルを一時DATA_DIR/localストレージの検証用API `127.0.0.1:3002` で表示。プリンターは無効。540層/108.00mmを約5.3秒で読み込み、270層/54.00mm・単層・移動経路の切替、390×844で横はみ出しなし、初期視点で全体が収まることを実Chromiumで確認。JavaScriptエラー0、印刷要求0。これは当該ブラウザ・モデルでの値であり、全端末/最大容量の性能保証ではない。
+- APIで返したG-code全体のSHA-256は元の展開内容と一致（`3a1ade33e583da48fb965cb4dc1f59598d4b301cbc03ad3cde84d57d80ffe165`）。分割描画と元ライブラリの描画を別途比較し、直線/円弧を含む28,974座標が一致、15個のgeometryが一度ずつ解放され、描画済みコマンドが残らないことを確認した。
+- 検証の画像/JSONは `/tmp/pi-wedge-large-preview-{desktop,mobile,layer270}.png` と `/tmp/pi-wedge-large-preview-result.json`。E2Eの結果は `/tmp/pi-wedge-large-preview-e2e-final/`。生成物はGit管理外。
+
+稼働サービスへの反映結果は次節。実スマートフォン・32MiB最大入力・実造形の検証は行っていない。
+
+## 全体表示変更の適用・再起動（2026-10-16）
+
+ユーザーから適用と再起動の明示的な承認を受け、実行中/待機中のスライス・pending印刷/停止操作が0件と再確認した後、`systemctl --user restart pi-wedge.service`で反映した。サービスはactive/running、新PID `2057936`。`http://pi5s.local:3000/health`は200、配信OpenAPIには総行数制限を撤廃したG-code APIの記述を確認。
+
+元のURL `http://pi5s.local:3000/preview/e14cc9db-78ed-46c7-aa1c-017bd9220a0f`をARM64 Chromium156で開き、全540層/108.00mmを約5.3秒で表示。270層/54.00mm・単層・移動経路の切替、390×844の横はみ出しなしを確認した。G-code取得は200、全10,427,078bytesのSHA-256は検証時の元ファイルと一致。3D表示エラー0、JavaScriptエラー0、印刷要求0。
+
+稼働サーバーでは別途「AMSの状態を取得できません。接続を確認して更新してください。」の警告を確認した。今回確認したのは全体プレビューの動作で、プリンターへの接続・供給・実印刷の成功は確認していない。画像/結果JSONは `/tmp/pi-wedge-large-preview-live-{desktop,mobile,layer270}.png` と `/tmp/pi-wedge-large-preview-live-result.json`（Git管理外）。
+
+## スライス履歴と名前（2026-10-19）
+
+実装: `/history` と `/history/data` を信頼するLAN向けに認証なしで追加。readyのスライス結果だけを新しい順に24件ずつ返し、返却項目は結果UUID・名前・作成日時・形式・推定時間・フィラメント量に限定する。名前と元モデルファイル名の検索に対応。`POST /api/slices` のJSON・multipartに任意の `name` を追加し、ジョブと成果物に保存。既存・無名の結果は元モデル名を表示する。プレビューから履歴へ移動できる。
+
+検証: `npm run check` は型・Lint・Format・70テスト・サーバー/UIビルド成功。履歴テストで名前の両入力形式、長さと制御文字の拒否、検索、ページ分割、モデルUUIDの除外、旧データの表示、OpenAPIの公開範囲を確認した。ローカル一時サーバー（localストレージ、プリンター無効）の `/history/data` はBearerなしで200・空配列を返した。`npm run test:e2e` は履歴画面、390px幅と既存プレビューを含むChromium6テスト成功。ブラウザテストのプリンター応答はモックで、実スライス・実印刷は行っていない。

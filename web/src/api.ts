@@ -17,6 +17,15 @@ export type PreviewData = {
   displayName: string;
   printerEnabled: boolean;
 };
+export type HistoryItem = {
+  id: string;
+  name: string;
+  createdAt: string;
+  format: 'gcode' | 'gcode.3mf';
+  estimatedSeconds: number | null;
+  filamentGrams: number | null;
+};
+export type HistoryPage = { items: HistoryItem[]; nextCursor: string | null };
 export class ApiError extends Error {
   constructor(
     public status: number,
@@ -41,6 +50,12 @@ export async function fetchPreview(path: string, init: RequestInit = {}) {
 export function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     switch (error.code) {
+      case 'printer_status_unavailable':
+        return 'AMSの状態を取得できません。接続を確認して更新してください。';
+      case 'ams_slot_unavailable':
+        return '選択したAMSスロットが空か、状態を確認できません。';
+      case 'ams_material_mismatch':
+        return 'AMSの材料がスライスのPLA設定と一致しません。';
       case 'printer_disabled':
         return 'プリンターが未設定です。';
       case 'printer_busy':
@@ -74,7 +89,7 @@ export function errorMessage(error: unknown) {
       case 404:
         return 'ファイルが見つかりません。';
       case 413:
-        return 'プレビューの上限を超えています。ダウンロードして確認してください。';
+        return 'G-codeがプレビューの容量上限を超えています。ダウンロードして確認してください。';
       case 422:
         return '印刷ファイルが不正です。';
       case 409:
@@ -118,3 +133,6 @@ export async function readLimitedText(
     reader.releaseLock();
   }
 }
+
+export type { PrinterStatus } from '../../src/domain/schemas.js';
+export type BrowserPrintSettings = { useAms: boolean; amsMapping?: number[] };

@@ -1,5 +1,5 @@
 import type { Readable } from 'node:stream';
-import type { FileMetadata, PrintOptions, SliceOptions } from './schemas.js';
+import type { FileMetadata, PrintOptions, SliceOptions, PrinterStatus } from './schemas.js';
 export interface ObjectStorage {
   put(id: string, body: Readable, size: number): Promise<void>;
   get(id: string): Promise<Readable>;
@@ -27,6 +27,7 @@ export interface ModelConverter {
   convert(input: ModelFile, options: SliceOptions['mesh']): Promise<ModelFile>;
 }
 export interface Printer {
+  readStatus(): Promise<PrinterStatus>;
   upload(file: FileMetadata, path: string): Promise<{ remotePath: string }>;
   startPrint(remotePath: string, options: PrintOptions, operationId: string): Promise<void>;
   stopPrint(operationId: string): Promise<void>;

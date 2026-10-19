@@ -39,3 +39,9 @@ AI/管理用の印刷APIはBearer + Idempotency-Key必須。LANのブラウザ�
 停止操作はaction stop、状態pending/accepted/failed/unknown。acceptedは要求受付であり、終了動作や機構の停止完了は別途実機で確認する。キーを再使用しても送信せず、既存結果を返す。開始用キーの再利用は409。GET `/api/printer/operations/{operationId}`で照会し、unknownは実機を確認した管理者が既存resolve APIで解決する。停止操作のfailed解決は「停止要求が受付されなかった」、accepted解決は「停止が受付された」の確認を表す。
 
 結果不明の開始が残っていても停止は要求できるが、通信中の同時操作は409。停止後も開始の不確定履歴は残す。結果不明の停止は新しいキーで再送せず、新規開始も止める。再起動時のpending停止はunknownへ復旧し、再送しない。停止APIはモックで検証し、実機での停止ACK確認済みという記録は前節の診断スクリプトによるものと区別する。
+
+## AMS Liteの状態と供給元
+
+Printer.readStatusはMQTT pushallのみを送信し、AMS Lite 0番ユニットのスロット0〜3を正規化する。tray_exist_bitsから装填、tray_typeから材料、tray_colorからRGB色、tray_nowから使用中スロット/外部スプールを取得する。不明値はnull。readStatusの共有・5秒キャッシュはPrinterServiceに置き、印刷のAMS確認は新しい状態を要求する。公開APIは機器識別子・RFID・生テレメトリを返さない。
+
+プレビューはスロット1〜4表記、API amsMappingは0〜3。同一の単色スライスに使う供給元だけを選び、スライス済み材料/温度・AMS登録情報は変更しない。空/不明スロット・既知のPLA以外の材料は開始前に拒否する。供給設定と操作キーはブラウザにも送信前から保存し、結果不明時に変更して新しい要求を作らない。実機で状態取得を確認したが、このUIからAMSを使った印刷の品質や供給切替は未検証。

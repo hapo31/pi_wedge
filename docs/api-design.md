@@ -2,30 +2,38 @@
 
 OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はローカル配信（CDN不要）。すべての `/api/*` は `Authorization: Bearer <API_TOKEN>`。UUID形式、Zod strictによる未知キー拒否、サイズ上限、エラーJSON `{error:{code,message}}`。認証トークンはクエリに渡さない。
 
-| Method / path                                      | 入力                                                          | 成功                           | 副作用                                                |
-| -------------------------------------------------- | ------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------- |
-| GET /health                                        | なし                                                          | 200 生存確認                   | なし、公開                                            |
-| GET /api/ready                                     | Bearer                                                        | 200/503 DB/S3確認              | 読取のみ                                              |
-| GET /api/profiles                                  | Bearer                                                        | 200 管理者設定プロファイル     | なし                                                  |
-| POST /api/files                                    | multipart file(STL/STEP)                                      | 201 File UUID                  | モデル保存                                            |
-| GET /api/files/{uuid}                              | UUID                                                          | 200 メタデータ                 | なし                                                  |
-| GET /api/files/{uuid}/download                     | UUID                                                          | 200 binary                     | 読取のみ                                              |
-| POST /api/slices                                   | JSON fileId/options または multipart file/options(JSON文字列) | 202 Job + Location             | 保存・キューのみ、印刷しない                          |
-| GET /api/slices/{jobId}                            | UUID                                                          | 200 Job                        | なし                                                  |
-| GET /api/files/{uuid}/gcode                        | UUID                                                          | 200 text/plain                 | G-code抽出のみ                                        |
-| POST /api/printer/upload                           | JSON fileId                                                   | 200 転送結果                   | プリンターのストレージへ書込、機構を動かさない        |
-| POST /api/printer/print                            | JSON fileId/options、Idempotency-Key(UUID)                    | 200 操作結果                   | 機器動作・加熱・造形開始                              |
-| POST /api/printer/stop                             | JSON {}、Idempotency-Key(UUID)                                | 200 停止操作結果               | 現在の印刷をキャンセル、終了動作が続くことがある      |
-| GET /api/printer/operations/{operationId}          | UUID                                                          | 200 操作の確定/不確定結果      | なし                                                  |
-| POST /api/printer/operations/{operationId}/resolve | outcome + inspectionNote                                      | 200 更新結果                   | 実機を確認した管理者がunknownを解決、機器は動かさない |
-| GET /preview/{uuid}                                | UUID                                                          | 200 React shell                | トークン入力なし、自動プレビュー                      |
-| GET /preview/{uuid}/data                           | UUID                                                          | 200 統計・元モデル名・印刷可否 | readyスライスだけ、物理操作なし                       |
-| GET /preview/{uuid}/gcode                          | UUID                                                          | 200 text/plain                 | 指定スライスのG-code抽出のみ                          |
-| GET /preview/{uuid}/download                       | UUID                                                          | 200 binary                     | 指定スライスの保存済み本体だけ                        |
-| POST /preview/{uuid}/print                         | UUID、Origin、Idempotency-Key、空の本体                       | 200 操作結果                   | 確認済みブラウザ操作、転送・加熱・造形開始            |
-| POST /mcp                                          | MCP JSON-RPC、Bearer                                          | MCP初期化・用途案内            | 案内のみ。ファイル・API・プリンターへアクセスしない   |
+| Method / path                                      | 入力                                                                      | 成功                           | 副作用                                                |
+| -------------------------------------------------- | ------------------------------------------------------------------------- | ------------------------------ | ----------------------------------------------------- |
+| GET /health                                        | なし                                                                      | 200 生存確認                   | なし、公開                                            |
+| GET /api/ready                                     | Bearer                                                                    | 200/503 DB/S3確認              | 読取のみ                                              |
+| GET /api/profiles                                  | Bearer                                                                    | 200 管理者設定プロファイル     | なし                                                  |
+| POST /api/files                                    | multipart file(STL/STEP)                                                  | 201 File UUID                  | モデル保存                                            |
+| GET /api/files/{uuid}                              | UUID                                                                      | 200 メタデータ                 | なし                                                  |
+| GET /api/files/{uuid}/download                     | UUID                                                                      | 200 binary                     | 読取のみ                                              |
+| POST /api/slices                                   | JSON fileId/name?/options または multipart file/name?/options(JSON文字列) | 202 Job + Location             | 保存・キューのみ、印刷しない                          |
+| GET /api/slices/{jobId}                            | UUID                                                                      | 200 Job                        | なし                                                  |
+| GET /history                                       | なし                                                                      | 200 履歴画面                   | 認証なし、物理操作なし                                |
+| GET /history/data                                  | q?（名前検索）、cursor?（結果UUID）                                       | 200 最新24件・次ページUUID     | readyスライスの限定情報のみ、物理操作なし             |
+| GET /api/files/{uuid}/gcode                        | UUID                                                                      | 200 text/plain                 | G-code抽出のみ                                        |
+| GET /api/printer/status                            | Bearer                                                                    | 200 プリンター/AMS Lite状態    | MQTT読取のみ、5秒以内のキャッシュ                     |
+| POST /api/printer/upload                           | JSON fileId                                                               | 200 転送結果                   | プリンターのストレージへ書込、機構を動かさない        |
+| POST /api/printer/print                            | JSON fileId/options、Idempotency-Key(UUID)                                | 200 操作結果                   | 機器動作・加熱・造形開始                              |
+| POST /api/printer/stop                             | JSON {}、Idempotency-Key(UUID)                                            | 200 停止操作結果               | 現在の印刷をキャンセル、終了動作が続くことがある      |
+| GET /api/printer/operations/{operationId}          | UUID                                                                      | 200 操作の確定/不確定結果      | なし                                                  |
+| POST /api/printer/operations/{operationId}/resolve | outcome + inspectionNote                                                  | 200 更新結果                   | 実機を確認した管理者がunknownを解決、機器は動かさない |
+| GET /preview/{uuid}                                | UUID                                                                      | 200 React shell                | トークン入力なし、自動プレビュー                      |
+| GET /preview/{uuid}/data                           | UUID                                                                      | 200 統計・元モデル名・印刷可否 | readyスライスだけ、物理操作なし                       |
+| GET /preview/{uuid}/gcode                          | UUID                                                                      | 200 text/plain                 | 指定スライスのG-code抽出のみ                          |
+| GET /preview/{uuid}/download                       | UUID                                                                      | 200 binary                     | 指定スライスの保存済み本体だけ                        |
+| GET /preview/{uuid}/printer                        | readyスライスUUID                                                         | 200 プリンター/AMS Lite状態    | MQTT読取のみ、識別子や生テレメトリを返さない          |
+| POST /preview/{uuid}/print                         | UUID、Origin、Idempotency-Key、空またはAMS設定JSON                        | 200 操作結果                   | 確認済みブラウザ操作、転送・加熱・造形開始            |
+| POST /mcp                                          | MCP JSON-RPC、Bearer                                                      | MCP初期化・用途案内            | 案内のみ。ファイル・API・プリンターへアクセスしない   |
 
-ブラウザ用 `/preview/*` は信頼するLAN内でトークン入力なし。公開範囲は指定UUIDのreadyスライス結果のみ。印刷はOriginが要求URLのoriginと一致することを検証し、Originなし/不一致は403、本文付きは400（1KiB超は413）。ブラウザが自動送信するOriginとクライアント側で保持するIdempotency-Keyを使用する。CORSを許可せず、AI用API_TOKENをUI・URLへ渡さない。
+ブラウザ用 `/history`・`/history/data`・`/preview/*` は信頼するLAN内でトークン入力なし。履歴はreadyのスライス結果UUID、表示名、作成日時、形式、推定時間、フィラメント量だけを新しい順に24件ずつ返す。任意の`q`は表示名と元モデルのファイル名を検索する。`cursor`には同じ検索条件で取得した前ページ最後の結果UUIDを指定する。モデル本体、スライス設定、API_TOKEN、プリンター情報は履歴に出さない。プレビューは指定UUIDのreadyスライス結果と限定されたプリンター/AMS状態だけを公開する。印刷はOriginが要求URLのoriginと一致することを検証し、Originなし/不一致は403。本文は空、またはContent-Type application/jsonの`{useAms, amsMapping?}`のみ。未知キー・不正な形式は400、1KiB超は413。ブラウザが自動送信するOriginとクライアント側で保持するIdempotency-Keyを使用する。CORSを許可せず、AI用API_TOKENをUI・URLへ渡さない。
+
+`POST /api/slices` の任意の `name` はJSON・multipartの両方で受け付ける。前後空白を除いた1～80文字で、制御文字は拒否する。ジョブと完成した成果物に保存し、履歴・プレビューに表示する。省略時や既存データは元モデルのファイル名を表示する。名前の指定は印刷・スライス設定を変更しない。
+
+`GET /api/files/{uuid}/gcode` と `GET /preview/{uuid}/gcode` は通常G-code、またはコンテナ内の`Metadata/plate_1.gcode`全体を返す。総行数での拒否や途中切り捨てはない。展開後の容量が`MAX_PREVIEW_MB`（既定32MiB、設定範囲1〜32）を超えると413。1行のコメント64KiB・コマンド4KiBやZIP構造の違反は422。元の成果物のダウンロードにはプレビュー容量上限を適用しない。
 
 `POST /mcp` は Streamable HTTP のJSON-RPC入口で、Bearer認証が必要。`pi_wedge_workflow` ツールがサービスの用途、`/docs`・`/openapi.json`、完了したスライスを開く `/preview/{resultFileId}` を案内するだけで、モデルのアップロード・スライス・印刷は実行しない。接続手順とツールの想定利用は [MCPガイド](mcp.md) を参照。
 
@@ -74,6 +82,7 @@ export PI_WEDGE_URL=http://raspberrypi.local:3000
 curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/profiles"
 curl -H "Authorization: Bearer $TOKEN" -F file=@model.stl "$PI_WEDGE_URL/api/files"
 curl -H "Authorization: Bearer $TOKEN" -F file=@model.step -F 'options={"layerHeight":0.2,"infillDensity":15}' "$PI_WEDGE_URL/api/slices"
+curl -H "Authorization: Bearer $TOKEN" -F file=@model.step -F 'name=収納ケースのふた' "$PI_WEDGE_URL/api/slices"
 curl -H "Authorization: Bearer $TOKEN" -H 'Content-Type: application/json' --data "{\"fileId\":\"$MODEL_ID\"}" "$PI_WEDGE_URL/api/slices"
 curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/slices/$JOB_ID"
 curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/files/$FILE_ID"
@@ -86,3 +95,12 @@ curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/printer/operations/$OP
 ```
 
 ブラウザは `/preview/$FILE_ID` を開くだけで表示する。AIがこのURLをユーザーへ渡す。JSONレスポンスのUUIDは手元に保存し、ジョブがsucceededになるまでpollする。unknownは結果を確認するまで新しいキーで再試行しない。
+過去のスライスはLAN内のブラウザで `/history` を開く。一覧からプレビューへ移動できる。
+
+## AMS供給設定
+
+`GET /api/printer/status` はBearer必須。`GET /preview/{uuid}/printer`はreadyスライスUUIDに限定したLANブラウザ用。MQTT pushallから`observedAt`、`gcodeState`、`amsConnected`、`currentSlot`、`externalSpoolActive`、最大4スロットの材料/色/装填/使用中/残量を返す。unknownはnull、残量はプリンターの報告値。機器識別子・RFID・生データは返さない。読取をまとめ、成功値を最大5秒キャッシュする。接続不可は502で古い成功値に置き換えない。
+
+ブラウザの設定例は`{"useAms":true,"amsMapping":[0]}`（画面のスロット1）。外部スプールは`{"useAms":false}`または従来の空本文。AMS Lite単色スライスの0〜3だけを許可し、useAmsとmappingの対応を検証する。設定でスライス済み温度・材料やAMS側の登録情報は書き換えない。新しい開始要求はアップロード前にAMS状態を再取得し、装填が確認できないスロットと既知のPLA以外の材料を拒否する。同一キーの再照会は状態取得や機器送信を行わない。
+
+Swaggerの開始API説明は、AIエージェントがモデル、フィラメント設定、AMS使用/スロット/材料/色、ベッドレベリング等をユーザーへ示し確認することを推奨する。ブラウザも選択内容を確認ダイアログに表示する。送信前にキーと供給設定をlocalStorageへ保存し、応答不達・ページ再読込でも元の要求を維持する。確定したfailed後の明示的再試行だけ新しいキーを生成する。

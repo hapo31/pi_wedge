@@ -1,3 +1,5 @@
+import { randomUUID } from 'node:crypto';
+import { parsePrinterStatus } from './printer-status.js';
 import { Client as FtpClient } from 'basic-ftp';
 import { connectAsync } from 'mqtt';
 import type { MqttClient } from 'mqtt';
@@ -8,6 +10,9 @@ import type { FileMetadata, PrintOptions } from '../domain/schemas.js';
 import type { Config } from '../config.js';
 import { AppError } from '../domain/errors.js';
 export class DisabledPrinter implements Printer {
+  async readStatus(): Promise<import('../domain/schemas.js').PrinterStatus> {
+    throw new AppError('printer_disabled', 'Configure and enable the printer before use', 503);
+  }
   async upload(_file: FileMetadata, _path: string): Promise<{ remotePath: string }> {
     throw new AppError('printer_disabled', 'Configure and enable the printer before use', 503);
   }
@@ -42,6 +47,36 @@ export class BambuLanPrinter implements Printer {
           }
         : {}),
     };
+  }
+  async readStatus() {
+    let client: MqttClient | undefined;
+    try {
+      client = await this.connector(`mqtts://${this.config.PRINTER_HOST}:8883`, {
+        ...(await this.tlsOptions()),
+        username: 'bblp',
+        password: this.config.PRINTER_ACCESS_CODE,
+        reconnectPeriod: 0,
+        connectTimeout: this.config.PRINTER_TIMEOUT_MS,
+        clientId: `pi_wedge_status_${randomUUID().slice(0, 8)}`,
+        clean: true,
+      });
+      client.on('error', () => {});
+      const report = `device/${this.config.PRINTER_SERIAL}/report`;
+      await client.subscribeAsync(report, { qos: 1 });
+      const state = await this.exchange(
+        client,
+        `device/${this.config.PRINTER_SERIAL}/request`,
+        report,
+        randomUUID(),
+        { pushing: { sequence_id: '0', command: 'pushall' } },
+        (p) => (p.ams && typeof p.ams === 'object' && !Array.isArray(p.ams) ? p : null),
+      );
+      return parsePrinterStatus(state as Record<string, unknown>);
+    } catch {
+      throw new AppError('printer_status_unavailable', 'Unable to read printer and AMS state', 502);
+    } finally {
+      await client?.endAsync(true).catch(() => {});
+    }
   }
   async upload(file: FileMetadata, path: string) {
     const remotePath = `/${file.id}.gcode.3mf`,

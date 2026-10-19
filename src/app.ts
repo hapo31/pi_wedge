@@ -18,10 +18,12 @@ import {
   JobSchema,
   OperationSchema,
   PrintRequestSchema,
+  PrinterStatusSchema,
   PrinterOperationSchema,
   StopOperationSchema,
   StopRequestSchema,
   SliceOptionsSchema,
+  SliceNameSchema,
   Uuid,
 } from './domain/schemas.js';
 import { AppError, safeError, logError } from './domain/errors.js';
@@ -52,11 +54,16 @@ const UploadSchema = z
   .object({ file: z.instanceof(File).openapi({ type: 'string', format: 'binary' }) })
   .strict();
 const SliceBody = z
-  .object({ fileId: Uuid, options: SliceOptionsSchema.default(SliceOptionsSchema.parse({})) })
+  .object({
+    fileId: Uuid,
+    name: SliceNameSchema.optional(),
+    options: SliceOptionsSchema.default(SliceOptionsSchema.parse({})),
+  })
   .strict();
 const SliceMultipart = z
   .object({
     file: z.instanceof(File).openapi({ type: 'string', format: 'binary' }),
+    name: SliceNameSchema.optional(),
     options: z.string().max(4096).optional().openapi({
       description: 'JSON-encoded SliceOptions. Omit for A1 mini defaults.',
       example: '{"layerHeight":0.2,"infillDensity":15,"support":false}',
@@ -415,7 +422,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
         security: secured,
         summary: 'Queue a non-blocking A1 mini slice',
         description:
-          'Accept an existing model UUID (JSON), or upload STL/STEP and JSON-encoded options (multipart). queued → running → succeeded/failed. Poll GET /api/slices/{jobId}; only succeeded has resultFileId. Result bytes are saved to storage, never returned here. No upload to printer and no physical action.',
+          'Accept an existing model UUID (JSON), or upload STL/STEP and JSON-encoded options (multipart). Optional name is a 1–80 character display label saved with the job and result; older or unnamed slices show the model filename. queued → running → succeeded/failed. Poll GET /api/slices/{jobId}; only succeeded has resultFileId. Result bytes are saved to storage, never returned here. No upload to printer and no physical action.',
         request: {
           body: {
             content: {
@@ -423,6 +430,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
                 schema: SliceBody,
                 example: {
                   fileId: exampleId,
+                  name: '収納ケースのふた',
                   options: { layerHeight: 0.2, infillDensity: 15, support: false },
                 },
               },
@@ -436,8 +444,10 @@ export function createApp(services?: Services & { ready?: boolean }) {
         jobs.assertCapacity();
         let modelId: string;
         let options;
+        let name: string | undefined;
         if (c.req.header('content-type')?.includes('multipart/form-data')) {
           const body = SliceMultipart.parse(c.req.valid('form'));
+          name = body.name;
           try {
             options = SliceOptionsSchema.parse(body.options ? JSON.parse(body.options) : {});
           } catch {
@@ -452,8 +462,9 @@ export function createApp(services?: Services & { ready?: boolean }) {
           const body = SliceBody.parse(c.req.valid('json'));
           modelId = body.fileId;
           options = body.options;
+          name = body.name;
         }
-        const job = jobs.create(modelId, options);
+        const job = jobs.create(modelId, options, name);
         c.header('Location', `/api/slices/${job.id}`);
         return c.json(job, 202);
       },
@@ -471,6 +482,22 @@ export function createApp(services?: Services & { ready?: boolean }) {
         responses: { 200: json(JobSchema, 'Current job state'), ...errors },
       }),
       (c) => c.json(jobs.get(c.req.valid('param').jobId), 200),
+    );
+    app.openapi(
+      createRoute({
+        method: 'get',
+        path: '/api/printer/status',
+        operationId: 'getPrinterStatus',
+        security: secured,
+        summary: 'Read current printer and AMS Lite slot state',
+        description:
+          'Read-only LAN MQTT snapshot, cached for up to five seconds. Does not move or heat the printer or change AMS configuration. Returns material, display color and occupancy for slots 0–3; null means unknown. Remaining percentage is printer-reported, not a measured guarantee. RFID, device identities and credentials are omitted.',
+        responses: { 200: json(PrinterStatusSchema, 'Printer and AMS Lite snapshot'), ...errors },
+      }),
+      async (c) => {
+        c.header('Cache-Control', 'no-store');
+        return c.json(await printer.status(), 200);
+      },
     );
     const FileRequest = z.object({ fileId: Uuid }).strict();
     app.openapi(
@@ -508,7 +535,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
         security: secured,
         summary: 'Explicitly start physical printing',
         description:
-          'PHYSICAL SIDE EFFECT: heats and moves the printer. Uploads the selected gcode.3mf first, then dispatches one MQTT print command. Idempotency-Key (UUID) is mandatory: repeat the same key/content to read the previous operation; never automatically retry with a new key. pending → accepted/failed/unknown. accepted means printer ACK, not completed printing; 504/unknown requires physical inspection. Same key with different content is 409. Other data APIs never invoke this action.',
+          'PHYSICAL SIDE EFFECT: heats and moves the printer. Uploads the selected gcode.3mf first, then dispatches one MQTT print command. Idempotency-Key (UUID) is mandatory: repeat the same key/content to read the previous operation; never automatically retry with a new key. pending → accepted/failed/unknown. accepted means printer ACK, not completed printing; 504/unknown requires physical inspection. Same key with different content is 409. Other data APIs never invoke this action. AIエージェントは実行前に、モデル、スライスのフィラメント設定、AMS使用有無と選択スロット（材料・色）、ベッドレベリング等の設定をユーザーへ提示し、確認を得ることを推奨します。Read /api/printer/status for current AMS information. AMS selection controls the feed slot; it does not change the sliced material or temperatures. Only a single-filament AMS Lite mapping (0–3) is supported. The selected slot is checked again before upload.',
         request: {
           headers: z.object({ 'Idempotency-Key': Uuid }),
           body: {
@@ -682,7 +709,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
         operationId: 'getPreviewGcode',
         security: secured,
         summary: 'Get bounded text G-code for browser preview',
-        description: `Extracts Metadata/plate_1.gcode from gcode.3mf or reads plain G-code. Limit ${services.config.MAX_PREVIEW_MB} MiB and 250,000 lines; larger artifacts remain downloadable/printable. No physical printer side effects. Invalid ZIP/toolpath returns 422.`,
+        description: `Extracts the full Metadata/plate_1.gcode from gcode.3mf or reads plain G-code. Limit ${services.config.MAX_PREVIEW_MB} MiB after decompression; no total line-count limit. Larger artifacts remain downloadable/printable. No physical printer side effects. Invalid ZIP/toolpath returns 422.`,
         request: { params: fileParams },
         responses: {
           200: {
@@ -719,6 +746,31 @@ export function createApp(services?: Services & { ready?: boolean }) {
         },
         400: errors[400],
         404: errors[404],
+        503: errors[503],
+      },
+    }),
+    async (c) => {
+      try {
+        return c.html(await readFile(join(webRoot, 'index.html'), 'utf8'));
+      } catch {
+        throw new AppError('ui_unbuilt', 'Build the web application with npm run build', 503);
+      }
+    },
+  );
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/history',
+      operationId: 'openSliceHistory',
+      security: [],
+      summary: 'Open the LAN slice history page',
+      description:
+        'Public on the trusted LAN. Opens the read-only slice history page; printing still requires a separate explicit action in a selected preview.',
+      responses: {
+        200: {
+          description: 'React history page',
+          content: { 'text/html': { schema: z.string() } },
+        },
         503: errors[503],
       },
     }),

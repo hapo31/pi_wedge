@@ -18,7 +18,7 @@ Raspberry Pi 5 8GB / ARM64 のLAN内でA1 mini用モデルをスライスし、U
 
 TypeScript strict / noUncheckedIndexedAccess、ESM、2スペース、Prettier。外部入力はZodで検証。UUID、形式、サイズ、数値範囲、未知キーを検証。CLIはspawn(shell:false)と固定の引数配列、タイムアウト、上限付きログ、一時領域のfinally清掃を使用。秘密をログ・例外・URLに出さない。
 OpenAPI 3.1は実行時スキーマと共有し、operationId、例、エラー、非同期状態、物理副作用を記述。変更時は整合性テスト・docs/api-design.mdを更新。
-ブラウザ用HTTPは `src/preview-routes.ts`。公開するデータは指定UUIDのreadyスライス結果だけ。モデル本体・一覧・設定・API_TOKENは公開しない。印刷はOriginなし/不一致を403、リクエスト本体なし、CORS許可なし。UIにAPI_TOKENを埋め込まない。
+ブラウザ用HTTPは `src/preview-routes.ts`。信頼するLANの `/history` と `/history/data` は認証なしでreadyスライスの名前・作成日時・形式・推定時間・フィラメント量・結果UUIDだけをページ分割して公開する。指定UUIDのプレビューにはreadyスライス結果と必要な限定プリンター/AMS状態だけを公開する。モデル本体・設定・API_TOKENは公開しない。印刷はOriginなし/不一致を403、空の本体または厳密なAMS供給設定JSON（1KiBまで）、CORS許可なし。UIにAPI_TOKENを埋め込まない。
 
 ## ユーザー向け文言
 

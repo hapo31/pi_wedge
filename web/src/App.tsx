@@ -2,6 +2,8 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 const Viewer = lazy(() => import('./Viewer.js').then((module) => ({ default: module.Viewer })));
 import { ApiError, fetchPreview, readLimitedText, errorMessage } from './api.js';
 import type { Metadata, Operation, PreviewData } from './api.js';
+import { AmsSettings } from './AmsSettings.js';
+import type { PrinterStatus, BrowserPrintSettings } from './api.js';
 import { PrintController } from './print-controller.js';
 import type { PrintState } from './print-controller.js';
 const INITIAL: PrintState = { busy: false, operation: null, message: '', key: null };
@@ -20,17 +22,24 @@ export function App() {
     [loading, setLoading] = useState(false),
     [ready, setReady] = useState(false),
     [printerEnabled, setPrinterEnabled] = useState(false),
-    [printState, setPrintState] = useState<PrintState>(INITIAL);
+    [printState, setPrintState] = useState<PrintState>(INITIAL),
+    [printerStatus, setPrinterStatus] = useState<PrinterStatus | null>(null),
+    [statusLoading, setStatusLoading] = useState(false),
+    [statusError, setStatusError] = useState(''),
+    [refresh, setRefresh] = useState(0),
+    [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const onViewerReady = useCallback((value: boolean) => setReady(value), []);
   const controller = useMemo(
     () =>
       new PrintController(
-        async (fileId, key) => {
+        async (fileId, key, settings) => {
           const response = await fetch(`/preview/${fileId}/print`, {
             method: 'POST',
             headers: {
               'Idempotency-Key': key,
+              'Content-Type': 'application/json',
             },
+            body: JSON.stringify(settings),
           });
           const body = await response.json();
           if (body.state) return body as Operation;
@@ -41,10 +50,7 @@ export function App() {
           );
         },
         setPrintState,
-        () =>
-          window.confirm(
-            '印刷しますか？\nベッドが空で、材料とプレートが合っていることを確認してください。',
-          ),
+        (_settings, message) => window.confirm(message ?? '印刷しますか？'),
       ),
     [],
   );
@@ -56,7 +62,8 @@ export function App() {
     setText('');
     setFile(null);
     setReady(false);
-    setPrintState(INITIAL);
+    const saved = controller.restore(uuid);
+    setSelectedSlot(saved.useAms ? (saved.amsMapping?.[0] ?? null) : null);
     void (async () => {
       try {
         const data = (await (
@@ -81,7 +88,43 @@ export function App() {
       }
     })();
     return () => abort.abort();
-  }, [uuid, validUuid]);
+  }, [uuid, validUuid, controller]);
+  useEffect(() => {
+    if (!file || !printerEnabled) return;
+    const abort = new AbortController();
+    setStatusLoading(true);
+    setStatusError('');
+    void (async () => {
+      try {
+        const snapshot = (await (
+          await fetchPreview(`/preview/${uuid}/printer`, { signal: abort.signal })
+        ).json()) as PrinterStatus;
+        abort.signal.throwIfAborted();
+        setPrinterStatus(snapshot);
+      } catch (e) {
+        if (!abort.signal.aborted) {
+          setPrinterStatus(null);
+          setStatusError(errorMessage(e));
+        }
+      } finally {
+        if (!abort.signal.aborted) setStatusLoading(false);
+      }
+    })();
+    return () => abort.abort();
+  }, [file, printerEnabled, uuid, refresh]);
+  const settingsLocked =
+    printState.busy ||
+    ['accepted', 'pending', 'unknown'].includes(printState.operation?.state ?? '') ||
+    Boolean(printState.key && !printState.operation);
+  const selected = printerStatus?.slots.find((s) => s.slot === selectedSlot);
+  const validSupply =
+    selectedSlot === null ||
+    (printerStatus?.amsConnected === true &&
+      selected?.present === true &&
+      (!selected.material || selected.material.toUpperCase() === 'PLA'));
+  const settings: BrowserPrintSettings =
+    selectedSlot === null ? { useAms: false } : { useAms: true, amsMapping: [selectedSlot] };
+  const confirmation = `印刷しますか？\n${displayName}\n供給元: ${selectedSlot === null ? '外部スプール' : `AMS スロット${selectedSlot + 1} · ${selected?.material ?? '材料未取得'} · ${selected?.color ?? '色未取得'}`}\nスライス設定: Generic PLA\nベッドレベリング: 有効\nベッドが空で、材料とプレートが合っていることを確認してください。`;
   async function download() {
     try {
       const response = await fetchPreview(`/preview/${uuid}/download`);
@@ -105,6 +148,9 @@ export function App() {
           <span className="brand-symbol">◈</span> pi_wedge
         </span>
         <span className="header-tag">プレビュー</span>
+        <a className="header-link" href="/history">
+          履歴
+        </a>
         <div className="connection">
           <span className={printerEnabled ? 'dot active' : 'dot'} />
           {printerEnabled ? 'プリンター設定済み' : 'プリンター未設定'}
@@ -171,16 +217,32 @@ export function App() {
             <small>0.4 mm ノズル · 180 mm プレート</small>
           </div>
           <div className="print-panel">
+            {file && printerEnabled && (
+              <AmsSettings
+                status={printerStatus}
+                loading={statusLoading}
+                error={statusError}
+                selected={selectedSlot}
+                disabled={settingsLocked}
+                onSelect={setSelectedSlot}
+                onRefresh={() => setRefresh((n) => n + 1)}
+              />
+            )}
             <button
               className="print-button"
               disabled={
                 !ready ||
                 !printerEnabled ||
+                (!validSupply &&
+                  !(
+                    printState.key &&
+                    (!printState.operation || printState.operation.state === 'pending')
+                  )) ||
                 printState.busy ||
                 printState.operation?.state === 'accepted' ||
                 printState.operation?.state === 'unknown'
               }
-              onClick={() => void controller.start(uuid)}
+              onClick={() => void controller.start(uuid, settings, confirmation)}
             >
               {printState.busy
                 ? '送信中…'
@@ -188,9 +250,11 @@ export function App() {
                   ? '受付済み'
                   : printState.operation?.state === 'unknown'
                     ? '結果不明'
-                    : printState.key
-                      ? '結果を確認'
-                      : '印刷'}
+                    : printState.operation?.state === 'failed'
+                      ? '再試行'
+                      : printState.key
+                        ? '結果を確認'
+                        : '印刷'}
             </button>
             {printState.message && (
               <p

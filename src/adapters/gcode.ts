@@ -2,6 +2,7 @@ import yauzl from 'yauzl';
 import { createReadStream } from 'node:fs';
 import { Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
+import { setImmediate } from 'node:timers/promises';
 import { AppError } from '../domain/errors.js';
 export function openGcode(
   path: string,
@@ -99,8 +100,8 @@ export async function inspectGcode(stream: Readable) {
     filamentGrams: number | null = null,
     filamentMillimeters: number | null = null;
   function line(text: string) {
-    if (++lines > 2000000 || text.length > (text.trimStart().startsWith(';') ? 65536 : 4096))
-      throw new AppError('invalid_gcode', 'G-code line limit exceeded', 422);
+    if (text.length > (text.trimStart().startsWith(';') ? 65536 : 4096))
+      throw new AppError('invalid_gcode', 'G-code line length limit exceeded', 422);
     if (/^G[0123]\s/i.test(text.trim())) {
       if (/(?:NaN|Infinity)/i.test(text))
         throw new AppError('invalid_gcode', 'Non-finite toolpath coordinate', 422);
@@ -134,9 +135,10 @@ export async function inspectGcode(stream: Readable) {
       while ((newline = remainder.indexOf('\n')) >= 0) {
         line(remainder.slice(0, newline));
         remainder = remainder.slice(newline + 1);
+        if (++lines % 10000 === 0) await setImmediate();
       }
       if (remainder.length > 65536)
-        throw new AppError('invalid_gcode', 'G-code line limit exceeded', 422);
+        throw new AppError('invalid_gcode', 'G-code line length limit exceeded', 422);
     }
     if (remainder) line(remainder);
     if (!hasMovement)
