@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { fetchPreview } from './api.js';
+import { getThumbnail } from './preview-queries.js';
 export function PlateThumbnails({
   uuid,
   plates,
@@ -23,10 +23,7 @@ export function PlateThumbnails({
       // Load one at a time to stay within the server's preview memory budget.
       for (const plate of key.split(',')) {
         try {
-          const response = await fetchPreview(`/preview/${uuid}/thumbnail?previewId=${plate}`, {
-            signal: abort.signal,
-          });
-          const blob = await response.blob();
+          const blob = await getThumbnail(uuid, plate, abort.signal);
           abort.signal.throwIfAborted();
           const url = URL.createObjectURL(blob);
           urls.push(url);

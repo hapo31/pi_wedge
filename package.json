@@ -29,6 +29,7 @@
     "@aws-sdk/client-s3": "^3.0.0",
     "@hono/node-server": "^1.0.0",
     "@hono/zod-openapi": "^1.0.0",
+    "@tanstack/react-router": "^1.170.45",
     "basic-ftp": "^6.2.3",
     "gcode-preview": "^2.0.0",
     "hono": "^4.0.0",

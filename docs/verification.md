@@ -233,3 +233,16 @@ AMS供給設定は今回の単色スライスで使う供給元/スロットの�
 - SQLiteの`quick_check`はok。readyファイル141件、ジョブsucceeded70件/failed1件、印刷操作accepted3件/failed2件は更新前と一致。既存結果を初めてプレビューしたため、プレート集合とプレビューのレコードが各1件追加された。
 
 稼働サービスでは読取だけを検証し、追加スライスは前節の専用DATA_DIR・実CLI/S3での結果と区別する。プリンター状態取得は更新前に502であり、今回の検証はプリンター接続成功や追加プレートの実機印刷を確認したものではない。
+
+## TanStack Routerとプレート切替（2026-10-21）
+
+変更前の`PreviewScreen key={path}`はプレート切替ごとに一覧を含む画面全体を再マウントしていた。TanStack Routerの親レイアウトへ一覧を残し、プレビューUUIDが変わったときだけ子のViewer・統計・印刷状態を作り直す構造に変更した。GETの取得処理は`web/src/preview-queries.ts`に集約し、loaderへの移行候補・キー・中断・メモリ・キャッシュ条件と、印刷POSTを移行対象にしない理由をコメントと設計に記録した。今回はReact effectでの取得を継続する。
+
+- 変更前: main `7c299ca`の隔離コピーで`npm run check`（90テスト・サーバー/UIビルド）と実Chromiumの既存E2E7件が成功。新規の一覧保持2件と履歴SPA遷移1件を変更前へ当て、実際のDOM切断・再読込で失敗することを確認した。短縮URLの正規化と結果不明の復元テストは変更前でも成功した。
+- 変更後: プリンター無効・localストレージ・専用DATA_DIRのAPIサーバー`127.0.0.1:3113`で`npm run check`（90テスト・サーバー/UIビルド）と実ChromiumのE2E13件が成功。型・Lint・Formatを含む。既存CLI子プロセステストの制約を避け、変更前後ともサンドボックス外で実行した。稼働サービスのdistを検証中に変更しないようソースを`/tmp/pi-wedge-router-candidate`へコピーしてビルドした。
+- 一覧: 12枚・1280px/390px幅で、データ取得待ち・完了・戻る/進むを通してnav・全ボタン・全画像のDOM、blob URL、横スクロール、表示範囲が保持され、追加のサムネイル要求は0件だった。
+- 競合・印刷状態: 遅い2枚目を待たずに3枚目へ切り替え、古い応答が統計・レイヤー・確認対象を上書きしないことを確認。プレビューごとのAMS設定、unknown/accepted、異なる冪等キーの保存・復元、正規URLのSPA遷移、短縮・旧URLの302、両UUID表示を確認した。印刷APIはすべてモック。
+- 独立レビューと修正: AMS4枠・通常スクロールバー・1280×900pxで、切替中だけ縦スクロールバーが消える横15pxの変動と、ページが縮むことでscrollYが135→0になり一覧が縦135px移動する問題を発見。スクロールバー幅の確保と親レイアウトでのサイドバー実測高保持を追加した。通常のPlaywrightの`--hide-scrollbars`を外した回帰テストで修正前の失敗を確認し、修正後は13件すべて成功した。
+- 最終の独立再測定: ready→loading→next readyでclientWidth1265px、一覧幅947px、画面内y608px、scrollY136px、bodyHeight1036px、sidebarHeight960pxが一致。コード再レビューでも必須修正の残件なし。
+
+結果は`/tmp/pi-wedge-router-baseline-e2e`、`/tmp/pi-wedge-router-regression-before`、`/tmp/pi-wedge-router-scrollbar-before`、`/tmp/pi-wedge-router-final-e2e`に保存した。Chromiumは`/tmp/pi-wedge-router-browsers`、共有ライブラリは既存の`/tmp/pi-wedge-copy-browser-deps/extracted/usr/lib/aarch64-linux-gnu`を使用した。実機の転送・印刷、スライサーやS3の変更は行っていない。
