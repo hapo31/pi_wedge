@@ -246,3 +246,14 @@ AMS供給設定は今回の単色スライスで使う供給元/スロットの�
 - 最終の独立再測定: ready→loading→next readyでclientWidth1265px、一覧幅947px、画面内y608px、scrollY136px、bodyHeight1036px、sidebarHeight960pxが一致。コード再レビューでも必須修正の残件なし。
 
 結果は`/tmp/pi-wedge-router-baseline-e2e`、`/tmp/pi-wedge-router-regression-before`、`/tmp/pi-wedge-router-scrollbar-before`、`/tmp/pi-wedge-router-final-e2e`に保存した。Chromiumは`/tmp/pi-wedge-router-browsers`、共有ライブラリは既存の`/tmp/pi-wedge-copy-browser-deps/extracted/usr/lib/aarch64-linux-gnu`を使用した。実機の転送・印刷、スライサーやS3の変更は行っていない。
+
+## TanStack Routerのマージと稼働サービス反映（2026-10-21）
+
+[PR #4](https://github.com/hapo31/pi_wedge/pull/4)を独立レビュー・修正・再検証後にマージした。main `047e329`と検証済みコミット`db6ca4f`のGitツリーが一致し、実装・依存・テストも隔離候補コピーと一致することを確認した。
+
+- 再起動直前にqueued/runningジョブ、pending/unknownの印刷・停止操作が0件であることを確認した。SQLiteの整合したバックアップと旧distを`/tmp/pi-wedge-router-deploy`へ保存し、検証したビルドをコピーして既存のユーザーサービス`pi-wedge.service`を再起動。新PID `2669139`でactive/runningになった。旧ハッシュのUI資産も保持した。
+- `/health`、認証付き`/api/ready`、`/history`、`/history/data`は200。新しいUI資産`index-DG2BvNuQ.js`の配信を確認した。SQLiteの`quick_check`はok、readyファイル144件、ジョブsucceeded73件/failed1件、印刷操作accepted3件/failed2件、集合2件・プレビュー4件は反映前と一致した。
+- `http://pi5s.local:3000`で実Chromiumを使用し、履歴24件、旧結果UUIDからの302、実保存データの3枚の画像、40層から890層のプレート切替と戻る、一覧DOM・画像URLの保持、追加サムネイル要求0件を確認した。デスクトップと390px幅の画像を保存し、横はみ出しなし・JavaScriptエラー0だった。
+- 稼働環境では読取だけを実行し、ブラウザからの印刷・停止・転送POSTは遮断して0件を確認した。プリンター接続成功や実機の印刷結果を検証したものではない。
+
+反映後の結果は`/tmp/pi-wedge-router-deploy/live-http-result.json`、`live-browser-result.json`、画像は同ディレクトリの`live-desktop.png`と`live-mobile.png`。バックアップはディレクトリ0700、SQLite0600でGit管理外に保存した。
