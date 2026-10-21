@@ -21,7 +21,11 @@ export type PlatePreview = {
   plate: number;
   sourcePlate: number;
 };
-export const ErrorInfo = z.object({ code: z.string(), message: z.string() });
+export const ErrorInfo = z.object({
+  code: z.string(),
+  message: z.string(),
+  parentId: Uuid.optional(),
+});
 export const ErrorResponse = z.object({ error: ErrorInfo }).openapi('ErrorResponse');
 export const SliceNameSchema = z
   .string()
@@ -70,6 +74,8 @@ export const FileSchema = z
     size: z.number().int().nonnegative(),
     createdAt: z.string().datetime(),
     sourceModelId: Uuid.nullable(),
+    parentId: Uuid.optional(),
+    plate: PlateNumber.optional(),
     sliceOptions: SliceOptionsSchema.nullable(),
     state: z.enum(['staging', 'ready', 'failed']),
     error: ErrorInfo.nullable(),
@@ -83,6 +89,9 @@ export const JobSchema = z
   .object({
     id: Uuid,
     modelId: Uuid,
+    parentId: Uuid.optional(),
+    plate: PlateNumber.optional(),
+    plateId: Uuid.optional(),
     name: SliceNameSchema.optional(),
     options: SliceOptionsSchema,
     state: z.enum(['queued', 'running', 'succeeded', 'failed']),
@@ -113,9 +122,9 @@ export const HistoryResponseSchema = z
     nextCursor: Uuid.nullable(),
   })
   .openapi('SliceHistoryPage');
-export const PrintOptionsSchema = z
+const PrintOptionsBase = z
   .object({
-    plate: PlateNumber.default(1),
+    plate: PlateNumber,
     bedLeveling: z.boolean().default(true),
     flowCalibration: z.boolean().default(false),
     vibrationCalibration: z.boolean().default(false),
@@ -125,20 +134,29 @@ export const PrintOptionsSchema = z
       description: 'Single-filament AMS Lite slot, zero-based (0–3). Required when useAms is true.',
     }),
   })
-  .strict()
-  .superRefine((v, c) => {
-    if (v.useAms && v.amsMapping?.length !== 1)
-      c.addIssue({ code: 'custom', message: 'useAms requires one amsMapping slot' });
-    if (!v.useAms && v.amsMapping)
-      c.addIssue({ code: 'custom', message: 'amsMapping requires useAms' });
-  })
+  .strict();
+function validateAms(v: { useAms: boolean; amsMapping?: number[] }, c: z.RefinementCtx) {
+  if (v.useAms && v.amsMapping?.length !== 1)
+    c.addIssue({ code: 'custom', message: 'useAms requires one amsMapping slot' });
+  if (!v.useAms && v.amsMapping)
+    c.addIssue({ code: 'custom', message: 'amsMapping requires useAms' });
+}
+export const PrintOptionsSchema = PrintOptionsBase.extend({ plate: PlateNumber.default(1) })
+  .superRefine(validateAms)
   .openapi('PrintOptions');
 export type PrintOptions = z.infer<typeof PrintOptionsSchema>;
+export const PrintRequestOptionsSchema = PrintOptionsBase.extend({
+  plate: PlateNumber.optional().openapi({
+    description: 'Omit to print the result metadata plate, or plate 1 for legacy results.',
+  }),
+})
+  .superRefine(validateAms)
+  .openapi('PrintRequestOptions');
+export type PrintRequestOptions = z.infer<typeof PrintRequestOptionsSchema>;
 export const PrintRequestSchema = z
   .object({
     fileId: Uuid,
-    options: PrintOptionsSchema.default({
-      plate: 1,
+    options: PrintRequestOptionsSchema.default({
       bedLeveling: true,
       flowCalibration: false,
       vibrationCalibration: false,

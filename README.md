@@ -73,3 +73,7 @@ MCPクライアントには `http://サーバーのLAN-IP:3000/mcp` をStreamabl
 複数プレートの実装: `/preview/{plateUUID}/{previewUUID}`で各枚を選び、下部サムネイル・統計・レイヤーを切り替える。プレートUUIDのみのURLは1枚目へリダイレクトする。履歴には枚数を表示し、プレビューのID欄で両UUIDを確認できる。従来の結果UUIDのURLも利用可能。
 
 複数プレートの検証: 自動テスト・実ブラウザの結果は[検証記録](docs/verification.md)へ記録する。複数枚の実機印刷は未検証。
+
+追加スライスの実装: `POST /api/slices`のJSON・multipartに`parentId`として親プレビューの結果UUIDを渡すと、同じプレートUUIDの3MFへ別の枚を追加する。追加結果は新しいプレビューUUIDとなる。子を親として指定すると400となり、`error.parentId`にルートのUUIDを返す。親3MFのダウンロードは最新版、個別のAPIダウンロードと印刷は保存時点の成果物を使用する。[API仕様](docs/api-design.md#親プレビューへの追加スライス)を参照。
+
+追加スライスの検証: `npm run test:slice -- --append MODEL`で実Orca/FreeCAD・S3保存と3枚までの追加を確認した。自動テスト・ブラウザ・3MF再読込の詳細は[検証記録](docs/verification.md)に記載。追加プレートの実機印刷は未検証。

@@ -1,11 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { Slicer, ModelConverter, ModelFile } from '../domain/contracts.js';
+import type { Slicer, ModelConverter, ModelFile, ParentPlateInput } from '../domain/contracts.js';
 import type { SliceOptions, SliceJob } from '../domain/schemas.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
 import { CommandError } from '../adapters/command.js';
+import { PreviewService } from './preview.js';
 import { FileService } from './files.js';
 export class JobService {
   private active = new Set<Promise<void>>();
@@ -32,7 +33,48 @@ export class JobService {
     )
       throw new AppError('queue_full', 'Slice queue is full', 409);
   }
+  async validateParent(parentId: string) {
+    const supplied = this.files.repository.get('file', Uuid.parse(parentId));
+    if (supplied?.parentId)
+      throw new AppError(
+        'parent_slice_required',
+        'Use the root preview UUID as parentId',
+        400,
+        supplied.parentId,
+      );
+    const preview = new PreviewService(this.files, this.dataDir, 32 * 1048576);
+    const { group, selected, previews } = await preview.selection(parentId);
+    if (parentId !== group.rootFileId || selected.id !== group.rootFileId)
+      throw new AppError(
+        'parent_slice_required',
+        'Use the root preview UUID as parentId',
+        400,
+        group.rootFileId,
+      );
+    const file = this.files.ready(group.fileId);
+    if (file.format !== 'gcode.3mf' || !file.sourceModelId)
+      throw new AppError(
+        'wrong_kind',
+        'Parent must be a server-generated print container preview UUID',
+        409,
+      );
+    if (Math.max(...previews.map((p) => p.plate)) >= 100)
+      throw new AppError('plate_limit', 'Plate limit reached', 409);
+    return group;
+  }
+  async createWithParent(modelId: string, options: SliceOptions, name?: string, parentId?: string) {
+    if (parentId) await this.validateParent(parentId);
+    return this.enqueue(modelId, options, name, parentId);
+  }
   create(modelId: string, options: SliceOptions, name?: string): SliceJob {
+    return this.enqueue(modelId, options, name);
+  }
+  private enqueue(
+    modelId: string,
+    options: SliceOptions,
+    name?: string,
+    parentId?: string,
+  ): SliceJob {
     this.assertCapacity();
     const f = this.files.ready(modelId);
     if (f.format !== 'stl' && f.format !== 'step')
@@ -40,6 +82,7 @@ export class JobService {
     const job = {
       id: randomUUID(),
       modelId,
+      ...(parentId ? { parentId } : {}),
       ...(name ? { name } : {}),
       options,
       state: 'queued' as const,
@@ -81,7 +124,27 @@ export class JobService {
       await this.files.materialize(f.id, path);
       let input: ModelFile = { id: f.id, path, format: f.format as 'stl' | 'step', workDir };
       if (input.format === 'step') input = await this.converter.convert(input, job.options.mesh);
-      const result = await this.slicer.slice(input, job.options);
+      let parent: ParentPlateInput | undefined;
+      let parentFileId: string | undefined;
+      if (job.parentId) {
+        const group = await this.validateParent(job.parentId);
+        parentFileId = group.fileId;
+        const path = join(workDir, 'parent.gcode.3mf');
+        await this.files.materialize(group.fileId, path);
+        parent = {
+          path,
+          plate: Math.max(...this.files.repository.previews(group.id).map((p) => p.plate)) + 1,
+        };
+      }
+      const result = parent
+        ? await this.slicer.slice(input, job.options, parent)
+        : await this.slicer.slice(input, job.options);
+      if (parent && (result.format !== 'gcode.3mf' || result.plate !== parent.plate))
+        throw new AppError(
+          'slicer_output_invalid',
+          'Slicer did not append the requested plate',
+          422,
+        );
       const artifact = await this.files.saveResult(
         job.reservedResultId,
         result.path,
@@ -90,11 +153,36 @@ export class JobService {
         result,
         result.format,
         job.name,
+        job.parentId,
+        result.plate,
       );
       job.resultFileId = artifact.id;
       job.state = 'succeeded';
+      if (job.parentId) {
+        this.files.repository.transaction(() => {
+          const group = this.files.repository.plateSetForFile(job.parentId!)!;
+          if (group.fileId !== parentFileId)
+            throw new AppError('parent_changed', 'Parent changed during slicing', 409);
+          group.fileId = artifact.id;
+          this.files.repository.save('plateSet', group);
+          this.files.repository.insert('platePreview', {
+            id: artifact.id,
+            plateId: group.id,
+            fileId: artifact.id,
+            plate: result.plate!,
+            sourcePlate: result.plate!,
+          });
+          job.plateId = group.id;
+          job.plate = result.plate!;
+          job.finishedAt = new Date().toISOString();
+          this.files.repository.save('job', job);
+        });
+      }
     } catch (error) {
       job.state = 'failed';
+      job.resultFileId = null;
+      delete job.plateId;
+      delete job.plate;
       job.error = safeError(error);
       logError('slice', id, error);
       if (error instanceof CommandError) {
@@ -111,7 +199,7 @@ export class JobService {
       this.files.repository.save('job', job);
       if (workDir) {
         const logs = [];
-        for (const name of ['freecad.log', 'orca.log']) {
+        for (const name of ['freecad.log', 'orca.log', 'append.log']) {
           try {
             logs.push(name + '\n' + (await readFile(join(workDir, name), 'utf8')));
           } catch {
@@ -142,6 +230,8 @@ export class JobService {
       await this.files.abandon(job.reservedResultId);
       job.state = 'failed';
       job.resultFileId = null;
+      delete job.plateId;
+      delete job.plate;
       job.error = { code: 'interrupted_job', message: 'Slice job interrupted by server restart' };
       job.finishedAt = new Date().toISOString();
       this.files.repository.save('job', job);

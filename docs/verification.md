@@ -193,3 +193,30 @@ AMS供給設定は今回の単色スライスで使う供給元/スロットの�
 - 正常な約32MiBの合成G-codeで、サムネイル生成中に10msタイマーが485回動作し、最大間隔は約30msだった。旧画面のG-codeとサムネイル相当を同時処理した実測は14.28秒で、再取得の待機上限以内だった。当該入力・環境での値であり、実3MFやストレージの遅延を含む性能保証ではない。
 
 稼働サービスへの反映・再起動、実機印刷はこの修正検証では行っていない。
+
+## 親プレビューへの追加スライス（2026-10-21）
+
+実装: JSON/multipartの`parentId`はルートのプレビュー結果UUID。子指定を400 `parent_slice_required`と`error.parentId`で拒否する。新規枚だけをスライスして不変の3MFスナップショットへ結合し、同じプレートUUIDの最新参照と新プレビューをDBトランザクションで確定する。既存UUIDと印刷要求は保持する。
+
+実CLI: `DATA_DIR=/tmp/pi-wedge-append-real-smoke PRINTER_ENABLED=false npm run test:slice -- --append .data/integration/cube.stl .data/integration/cube.step`を実行。ARM64 Debian13のOrca2.4.2/FreeCAD1.0（Docker、ネットワーク無効）から実SeaweedFS/S3へ保存し、STL/STEPそれぞれ1→2→3枚の全6ジョブがsucceeded。2枚目のみ積層0.16mmとし、1/3枚目は0.2mm。元のG-codeの一致、各枚の読取、プレートUUIDの維持、追加分の別プレビューUUIDを確認した。
+
+- STL: プレートUUID `fad54698-6884-44d0-8df0-fe4bc89897de`、ルート `97662892-0469-4a22-b5d1-b3ae7d935817`。G-code 465,915 / 578,085 / 465,915bytes。
+- STEP: プレートUUID `06e713cc-442b-4011-b6ec-94e8d007d333`、ルート `ec92eddb-d1cb-46c8-a8b7-886ef00ba91a`。G-code 466,715 / 579,085 / 466,715bytes。
+- 保存済みSTLの3枚入り3MFを実Orcaの`--info`で再読込し、3モデルとも20mm・12 facets・manifoldとして正常終了。ログは`/tmp/pi-wedge-append-real-roundtrip/orca-info.log`。
+
+自動テストではPython標準ライブラリによる実結合を5枚まで実行し、列数変更時のモデル配置、既存G-code/md5の一致、外部モデルパス・オブジェクトID・slice_info・filament_sequenceを検証する。サービス/APIはスライサーモックでJSON/multipart、複数要求の直列追加、子指定の400と保存前拒否、CLI/ストレージ/DB障害のロールバック、queued/runningの再起動復旧、OpenAPI整合性を確認する。既存CLI子プロセステストはサンドボックス制限外で実行する。
+
+転送・加熱・実機印刷は行っていない。追加プレートのA1 miniでの実印刷、GUIでの再編集/再スライス、最大100枚・容量上限での性能は未検証。稼働サービスは再起動・反映していない。
+
+最終確認:
+
+- `npm run check`: 型/Lint/Format・83テスト・サーバー/UIビルド成功。
+- `npm run test:e2e`: 2件目を含む専用APIサーバーで実Chromium7テスト成功（印刷要求はモック）。
+- 実HTTPの`POST /api/slices`で子指定の400/ルートIDを確認後、同じSTL集合へ4枚目を追加してsucceeded。結果UUID `be7e336e-5698-4759-b341-7fbd68e2eda8`、`plate=4`、`parentId`と`plateId`の一致を確認。
+- 実S3成果物を実Chromiumで表示し、4サムネイル、1枚目100層/2枚目125層、先頭への302・切替・再読込・戻る・4枚目の直接URL・390px幅を確認。JavaScriptエラー0、印刷要求0、印刷ボタン無効。画像は`/tmp/pi-wedge-append-real-roundtrip/preview-desktop.png`と`preview-mobile.png`。
+
+## PRレビュー修正（2026-10-21）
+
+追加スライスの第1回サブエージェントレビューで、認証付き印刷APIの番号省略時に追加枚ではなく1枚目を選ぶ問題を確認した。要求スキーマでplate未指定を保持し、PrinterServiceが保存済みの結果メタデータのplateへ解決する。番号のない旧結果は1、明示指定を優先し、解決後の設定で永続化・冪等性比較する。モックで追加枚2の省略、同じキーの明示2再照会、同キーの別枚409、新キーの明示1、旧結果の省略1を確認した。実機の開始・停止は実行していない。
+
+両PRでサブエージェントによる第2回レビューを実施し、追加の修正必須事項なし。統合後の`npm run check`は型/Lint/Format・90テスト・サーバー/UIビルドが成功し、実ChromiumのE2E7件も成功した。実S3の4枚入り成果物でも100/125層の切替・URL・再読込・戻る・390px幅を再確認し、印刷要求とJavaScriptエラーは0だった。実行環境の読み取り専用管理ディレクトリでLint走査が失敗したため、Git管理外の`.agents`・`.codex`・`.aws`をLintの対象外にした。

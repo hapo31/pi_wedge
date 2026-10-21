@@ -2,12 +2,12 @@ import { mkdtemp, mkdir, rm } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
 import type { Printer } from '../domain/contracts.js';
 import type {
-  PrintOptions,
+  PrintRequestOptions,
   PrintOperation,
   StopPrintOperation,
   PrinterStatus,
 } from '../domain/schemas.js';
-import { Uuid } from '../domain/schemas.js';
+import { PrintOptionsSchema, Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
 import { listPlates } from '../adapters/gcode.js';
 import { FileService } from './files.js';
@@ -91,7 +91,11 @@ export class PrinterService {
     if ('action' in op) this.files.repository.save('stopOperation', op);
     else this.files.repository.save('operation', op);
   }
-  async print(fileId: string, options: PrintOptions, key: string): Promise<PrintOperation> {
+  async print(
+    fileId: string,
+    requested: PrintRequestOptions,
+    key: string,
+  ): Promise<PrintOperation> {
     Uuid.parse(key);
     if (this.files.repository.get('stopOperation', key))
       throw new AppError(
@@ -100,11 +104,18 @@ export class PrinterService {
         409,
       );
     const existing = this.files.repository.get('operation', key);
+    if (existing && existing.fileId !== fileId)
+      throw new AppError(
+        'idempotency_conflict',
+        'This Idempotency-Key was used for a different request',
+        409,
+      );
+    const options = PrintOptionsSchema.parse({
+      ...requested,
+      plate: requested.plate ?? this.files.metadata(fileId).plate ?? 1,
+    });
     if (existing) {
-      if (
-        existing.fileId !== fileId ||
-        JSON.stringify(existing.options) !== JSON.stringify(options)
-      )
+      if (JSON.stringify(existing.options) !== JSON.stringify(options))
         throw new AppError(
           'idempotency_conflict',
           'This Idempotency-Key was used for a different request',

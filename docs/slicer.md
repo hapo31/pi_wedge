@@ -48,3 +48,13 @@ npm run profiles:prepare
 `docker build -f deploy/Dockerfile.tools -t pi-wedge-tools:0.1 .` を実行し、`.env`に `TOOLS_BACKEND=docker`、`TOOLS_IMAGE=pi-wedge-tools:0.1`、`ORCA_BIN=/opt/squashfs-root/AppRun`、`FREECAD_PYTHON=/usr/bin/python3`、`FREECAD_MODULE_PATH=/usr/lib/freecad-python3/lib` を設定する。プロファイルは同じ `npm run profiles:prepare` で準備する。アプリの実行ユーザーにはDocker操作権限が必要。DockerソケットをAPIへ公開しない。
 
 DockerCommandRunnerがジョブ領域・プロファイル・固定の変換スクリプトだけをマウントし、ネットワーク無効・image pull無効で実行する（イメージは事前ビルド必須）。S3/プリンター/API資格情報をツールへ渡さない。CLI timeout後にコンテナを強制削除し、起動時はDATA_DIRラベルの残存コンテナを回収する。コンテナ回収に失敗した場合は依存復旧失敗として受付を止める。4GiB/3CPU/256PID上限はDockerに指定する。実ホストのcgroup対応を確認する（検証ホストはmemory limit非対応の警告を出したため、Pi上の上限動作は別検証）。
+
+## プレートへの追加
+
+`Slicer.slice`は任意の内部`ParentPlateInput`（ジョブ領域の親3MFパスと次の枚番号）を受け取れる。新しいSTL/変換済みSTEPを通常通り1枚だけOrcaでスライスした後、Orcaアダプター内から固定の`scripts/append-plate.py`を実行して結合する。Python標準ライブラリのみを使用し、native/dockerとも既存のCommandRunnerのタイムアウト・上限ログ・秘密を除いた環境を使う。Dockerでは固定スクリプトを読取専用でマウントする。
+
+結合は[Orca v2.4.2の3MF実装](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/Format/bbs_3mf.cpp)と[プレート座標実装](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/slic3r/GUI/PartPlate.cpp)に合わせ、既存G-code/md5は変更しない。モデルのオブジェクトIDと外部モデルパスを重複なく付け替え、model_settings/slice_info/filament_sequence/relationshipsを更新する。A1 miniの180mmベッド・1.2倍間隔・平方根切上げの列数でモデル配置を更新する。印刷用G-codeの座標は変えない。既存設定は保持し、新規枚は今回のスライス設定で生成済みのG-codeを使う。
+
+ZIPを展開せずにコピーし、2000エントリ、番号100、XML/JSON各8MiB、展開後合計MAX_ARTIFACT_MBの8倍、圧縮後MAX_ARTIFACT_MBの上限を検証する。暗号化・重複名・不正パス・DTD/実体宣言を拒否。新しい集合参照はストレージ保存後にSQLiteで確定し、途中の成果物はジョブ領域と共に清掃する。
+
+追加の実CLI試験は`npm run test:slice -- --append MODEL`。通常の1枚に続いて2枚追加し、同じプレートUUID、各結果UUID、選択G-code、元のG-code不変を検証する。専用DATA_DIRを使い、実ストレージへ保存するが印刷はしない。検証結果は[verification.md](verification.md)を参照。

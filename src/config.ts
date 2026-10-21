@@ -16,7 +16,7 @@ const envSchema = z.object({
   MAX_UPLOAD_MB: z.coerce.number().int().min(1).max(200).default(50),
   MAX_ARTIFACT_MB: z.coerce.number().int().min(1).max(1024).default(200),
   MAX_PREVIEW_MB: z.coerce.number().int().min(1).max(32).default(32),
-  SLICE_CONCURRENCY: z.coerce.number().int().min(1).max(2).default(1),
+  SLICE_CONCURRENCY: z.coerce.number().int().min(1).max(1).default(1),
   MAX_QUEUED_JOBS: z.coerce.number().int().min(1).max(100).default(20),
   COMMAND_TIMEOUT_MS: z.coerce.number().int().min(1000).max(3600000).default(600000),
   TOOLS_BACKEND: z.enum(['native', 'docker']).default('native'),
