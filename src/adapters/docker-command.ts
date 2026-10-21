@@ -19,6 +19,7 @@ export class DockerCommandRunner implements CommandRunner {
       resolve(cwd),
       resolve(this.config.PROFILE_DIR),
       resolve('scripts/step-to-stl.py'),
+      resolve('scripts/append-plate.py'),
     ];
     const dockerArgs = [
       'run',

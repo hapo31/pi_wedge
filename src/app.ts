@@ -58,6 +58,7 @@ const SliceBody = z
   .object({
     fileId: Uuid,
     name: SliceNameSchema.optional(),
+    parentId: Uuid.optional(),
     options: SliceOptionsSchema.default(SliceOptionsSchema.parse({})),
   })
   .strict();
@@ -65,6 +66,7 @@ const SliceMultipart = z
   .object({
     file: z.instanceof(File).openapi({ type: 'string', format: 'binary' }),
     name: SliceNameSchema.optional(),
+    parentId: Uuid.optional(),
     options: z.string().max(4096).optional().openapi({
       description: 'JSON-encoded SliceOptions. Omit for A1 mini defaults.',
       example: '{"layerHeight":0.2,"infillDensity":15,"support":false}',
@@ -424,7 +426,7 @@ export function createApp(services?: Services & { ready?: boolean }) {
         security: secured,
         summary: 'Queue a non-blocking A1 mini slice',
         description:
-          'Accept an existing model UUID (JSON), or upload STL/STEP and JSON-encoded options (multipart). Optional name is a 1–80 character display label saved with the job and result; older or unnamed slices show the model filename. queued → running → succeeded/failed. Poll GET /api/slices/{jobId}; only succeeded has resultFileId. Result bytes are saved to storage, never returned here. No upload to printer and no physical action.',
+          'Accept an existing model UUID (JSON), or upload STL/STEP and JSON-encoded options (multipart). Optional parentId is the root preview result UUID: append the new slice as a separate plate to its 3MF plate set; successful append jobs and file metadata include the new plate number as plate (authenticated printing of that snapshot must explicitly select options.plate); the plate UUID stays stable and existing preview UUIDs stay valid. A child preview UUID returns 400 parent_slice_required with error.parentId set to the root preview UUID. Root must be ready and server-generated. Jobs append serially to the latest successful container; failed jobs leave it unchanged. Optional name is a 1–80 character display label saved with the job and result; older or unnamed slices show the model filename. queued → running → succeeded/failed. Poll GET /api/slices/{jobId}; only succeeded has resultFileId. Result bytes are saved to storage, never returned here. No upload to printer and no physical action.',
         request: {
           body: {
             content: {
@@ -447,9 +449,12 @@ export function createApp(services?: Services & { ready?: boolean }) {
         let modelId: string;
         let options;
         let name: string | undefined;
+        let parentId: string | undefined;
         if (c.req.header('content-type')?.includes('multipart/form-data')) {
           const body = SliceMultipart.parse(c.req.valid('form'));
           name = body.name;
+          parentId = body.parentId;
+          if (parentId) await jobs.validateParent(parentId);
           try {
             options = SliceOptionsSchema.parse(body.options ? JSON.parse(body.options) : {});
           } catch {
@@ -465,8 +470,9 @@ export function createApp(services?: Services & { ready?: boolean }) {
           modelId = body.fileId;
           options = body.options;
           name = body.name;
+          parentId = body.parentId;
         }
-        const job = jobs.create(modelId, options, name);
+        const job = await jobs.createWithParent(modelId, options, name, parentId);
         c.header('Location', `/api/slices/${job.id}`);
         return c.json(job, 202);
       },

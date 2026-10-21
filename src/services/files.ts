@@ -97,6 +97,8 @@ export class FileService {
     stats: Pick<FileMetadata, 'estimatedSeconds' | 'filamentGrams' | 'filamentMillimeters'>,
     format: 'gcode' | 'gcode.3mf',
     displayName?: string,
+    parentId?: string,
+    plate?: number,
   ) {
     const size = (await stat(path)).size;
     if (!size || size > this.maxArtifact)
@@ -106,6 +108,8 @@ export class FileService {
         id,
         name: `${id}.${format}`,
         displayName,
+        parentId,
+        plate,
         format,
         size,
         sourceModelId,

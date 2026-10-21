@@ -21,7 +21,11 @@ export type PlatePreview = {
   plate: number;
   sourcePlate: number;
 };
-export const ErrorInfo = z.object({ code: z.string(), message: z.string() });
+export const ErrorInfo = z.object({
+  code: z.string(),
+  message: z.string(),
+  parentId: Uuid.optional(),
+});
 export const ErrorResponse = z.object({ error: ErrorInfo }).openapi('ErrorResponse');
 export const SliceNameSchema = z
   .string()
@@ -70,6 +74,8 @@ export const FileSchema = z
     size: z.number().int().nonnegative(),
     createdAt: z.string().datetime(),
     sourceModelId: Uuid.nullable(),
+    parentId: Uuid.optional(),
+    plate: PlateNumber.optional(),
     sliceOptions: SliceOptionsSchema.nullable(),
     state: z.enum(['staging', 'ready', 'failed']),
     error: ErrorInfo.nullable(),
@@ -83,6 +89,9 @@ export const JobSchema = z
   .object({
     id: Uuid,
     modelId: Uuid,
+    parentId: Uuid.optional(),
+    plate: PlateNumber.optional(),
+    plateId: Uuid.optional(),
     name: SliceNameSchema.optional(),
     options: SliceOptionsSchema,
     state: z.enum(['queued', 'running', 'succeeded', 'failed']),

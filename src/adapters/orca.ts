@@ -1,17 +1,22 @@
 import { readFile, writeFile, stat } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { Slicer, ModelFile, SliceResult } from '../domain/contracts.js';
+import type { Slicer, ModelFile, SliceResult, ParentPlateInput } from '../domain/contracts.js';
 import type { SliceOptions } from '../domain/schemas.js';
 import type { CommandRunner } from './command.js';
 import type { Config } from '../config.js';
+import { CommandError } from './command.js';
 import { AppError } from '../domain/errors.js';
-import { openGcode, inspectGcode } from './gcode.js';
+import { openGcode, inspectGcode, listPlates } from './gcode.js';
 export class OrcaSlicerAdapter implements Slicer {
   constructor(
     private runner: CommandRunner,
     private config: Config,
   ) {}
-  async slice(input: ModelFile, options: SliceOptions): Promise<SliceResult> {
+  async slice(
+    input: ModelFile,
+    options: SliceOptions,
+    parent?: ParentPlateInput,
+  ): Promise<SliceResult> {
     const dir = resolve(this.config.PROFILE_DIR);
     let processProfile: Record<string, unknown>;
     try {
@@ -96,6 +101,48 @@ export class OrcaSlicerAdapter implements Slicer {
     const stats = await inspectGcode(
       await openGcode(path, 'gcode.3mf', this.config.MAX_ARTIFACT_MB * 1048576),
     );
+    if (parent) {
+      const existing = await listPlates(parent.path);
+      if (parent.plate !== existing.at(-1)! + 1)
+        throw new AppError('slicer_output_invalid', 'Invalid next plate number', 422);
+      const combined = join(input.workDir, 'combined.gcode.3mf');
+      let log;
+      try {
+        log = await this.runner.run(
+          this.config.FREECAD_PYTHON,
+          [
+            resolve('scripts/append-plate.py'),
+            parent.path,
+            path,
+            combined,
+            String(this.config.MAX_ARTIFACT_MB * 1048576),
+          ],
+          input.workDir,
+        );
+      } catch (error) {
+        if (error instanceof CommandError && error.code === 'command_failed')
+          throw new AppError(
+            'container_append_failed',
+            'Could not append plate to the parent print container',
+            422,
+          );
+        throw error;
+      }
+      const plates = await listPlates(combined);
+      if (
+        JSON.stringify(plates) !== JSON.stringify([...existing, parent.plate]) ||
+        plates.at(-1) !== parent.plate ||
+        (await stat(combined)).size > this.config.MAX_ARTIFACT_MB * 1048576
+      )
+        throw new AppError('slicer_output_invalid', 'Invalid appended print container', 422);
+      await inspectGcode(
+        await openGcode(combined, 'gcode.3mf', this.config.MAX_ARTIFACT_MB * 1048576, parent.plate),
+      );
+      await writeFile(join(input.workDir, 'append.log'), log.stdout + '\n' + log.stderr, {
+        mode: 0o600,
+      });
+      return { path: combined, format: 'gcode.3mf', plate: parent.plate, ...stats };
+    }
     return { path, format: 'gcode.3mf', ...stats };
   }
 }

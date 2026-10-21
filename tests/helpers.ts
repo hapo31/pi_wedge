@@ -8,6 +8,7 @@ import { LocalStorage } from '../src/adapters/storage.js';
 import { FileService } from '../src/services/files.js';
 import { JobService } from '../src/services/jobs.js';
 import { PrinterService } from '../src/services/printer.js';
+import { listPlates, openGcode } from '../src/adapters/gcode.js';
 import { createApp } from '../src/app.js';
 import type { Slicer, ModelConverter, Printer } from '../src/domain/contracts.js';
 export const TOKEN = 'test-only-token-01234567890123456789';
@@ -78,12 +79,22 @@ export async function setup(
     storage = new LocalStorage(join(dir, 'objects'));
   const files = new FileService(repository, storage, 1048576, 10485760);
   const slicer: Slicer = overrides.slicer ?? {
-    slice: vi.fn(async (input) => {
+    slice: vi.fn(async (input, _options, parent) => {
       const path = join(input.workDir, 'result.gcode.3mf');
-      await writeFile(path, storedZip('Metadata/plate_1.gcode', Buffer.from(GCODE)));
+      const entries: [string, Buffer][] = [];
+      if (parent)
+        for (const plate of await listPlates(parent.path)) {
+          const chunks: Buffer[] = [];
+          for await (const chunk of await openGcode(parent.path, 'gcode.3mf', 10485760, plate))
+            chunks.push(Buffer.from(chunk));
+          entries.push([`Metadata/plate_${plate}.gcode`, Buffer.concat(chunks)]);
+        }
+      entries.push([`Metadata/plate_${parent?.plate ?? 1}.gcode`, Buffer.from(GCODE)]);
+      await writeFile(path, storedEntries(entries));
       return {
         path,
         format: 'gcode.3mf' as const,
+        ...(parent ? { plate: parent.plate } : {}),
         estimatedSeconds: 62,
         filamentGrams: 1.2,
         filamentMillimeters: 340,

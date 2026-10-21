@@ -13,7 +13,12 @@ export interface ModelFile {
   format: 'stl' | 'step';
   workDir: string;
 }
+export interface ParentPlateInput {
+  path: string;
+  plate: number;
+}
 export interface SliceResult {
+  plate?: number;
   path: string;
   format: 'gcode' | 'gcode.3mf';
   estimatedSeconds: number | null;
@@ -21,7 +26,7 @@ export interface SliceResult {
   filamentMillimeters: number | null;
 }
 export interface Slicer {
-  slice(input: ModelFile, options: SliceOptions): Promise<SliceResult>;
+  slice(input: ModelFile, options: SliceOptions, parent?: ParentPlateInput): Promise<SliceResult>;
 }
 export interface ModelConverter {
   convert(input: ModelFile, options: SliceOptions['mesh']): Promise<ModelFile>;
