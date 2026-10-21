@@ -220,3 +220,16 @@ AMS供給設定は今回の単色スライスで使う供給元/スロットの�
 追加スライスの第1回サブエージェントレビューで、認証付き印刷APIの番号省略時に追加枚ではなく1枚目を選ぶ問題を確認した。要求スキーマでplate未指定を保持し、PrinterServiceが保存済みの結果メタデータのplateへ解決する。番号のない旧結果は1、明示指定を優先し、解決後の設定で永続化・冪等性比較する。モックで追加枚2の省略、同じキーの明示2再照会、同キーの別枚409、新キーの明示1、旧結果の省略1を確認した。実機の開始・停止は実行していない。
 
 両PRでサブエージェントによる第2回レビューを実施し、追加の修正必須事項なし。統合後の`npm run check`は型/Lint/Format・90テスト・サーバー/UIビルドが成功し、実ChromiumのE2E7件も成功した。実S3の4枚入り成果物でも100/125層の切替・URL・再読込・戻る・390px幅を再確認し、印刷要求とJavaScriptエラーは0だった。実行環境の読み取り専用管理ディレクトリでLint走査が失敗したため、Git管理外の`.agents`・`.codex`・`.aws`をLintの対象外にした。
+
+## 複数プレート・追加スライスのマージと稼働サービス適用（2026-10-21）
+
+ユーザーの承認を受け、[PR #2](https://github.com/hapo31/pi_wedge/pull/2)と[PR #3](https://github.com/hapo31/pi_wedge/pull/3)をそれぞれ2回のサブエージェントレビューと修正後、順にマージした。mainの`38efc4d`は、90テスト・ビルド・E2E7件を通したソースと同じツリーであることを確認して適用した。
+
+- 停止前にqueued/runningジョブとpending/unknownの印刷・停止操作が0件と確認。停止後にSQLiteの整合したバックアップを`/tmp/pi-wedge-deploy-20261021-review/metadata-before-restart.sqlite`へ保存した（ディレクトリ0700、ファイル0600、Git管理外）。S3の成果物は変更していない。
+- 稼働していた`pi-wedge.service`は一時ユニットで、停止により定義が消えた。同じ作業ディレクトリと`.env`、`/usr/local/bin/node --env-file-if-exists=.env dist/server.js`で再作成した。新PIDは`2648371`、active/runningを確認。
+- `/health`・認証付き`/api/ready`・`/history`・`/history/data`は200。配信OpenAPIにネストしたプレビューURLと`parentId`を確認し、印刷要求のplateに誤った既定値がないことも確認した。
+- 保存済み結果UUIDからの302、正規URLのdata・G-code・SVGサムネイルの200、公開情報に元モデルUUIDとスライス設定が含まれないことを確認した。対象G-codeは1,189,455bytes。
+- `http://pi5s.local:3000`を実Chromiumで開き、履歴24件、旧結果URLから正規URLへの移動、40層の3D表示、プレート/プレビューの両UUID、390px幅で横はみ出しなしを確認。JavaScriptエラー0、印刷・停止・転送のPOSTは0件。画像は`/tmp/pi-wedge-deploy-20261021-review/live-{desktop,mobile}.png`。
+- SQLiteの`quick_check`はok。readyファイル141件、ジョブsucceeded70件/failed1件、印刷操作accepted3件/failed2件は更新前と一致。既存結果を初めてプレビューしたため、プレート集合とプレビューのレコードが各1件追加された。
+
+稼働サービスでは読取だけを検証し、追加スライスは前節の専用DATA_DIR・実CLI/S3での結果と区別する。プリンター状態取得は更新前に502であり、今回の検証はプリンター接続成功や追加プレートの実機印刷を確認したものではない。
