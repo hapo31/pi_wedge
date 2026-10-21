@@ -26,7 +26,7 @@ export function toolpathThumbnail(text: string) {
     if (command === 'M83') relativeE = true;
     if (!['G0', 'G1', 'G2', 'G3', 'G92'].includes(command ?? '')) continue;
     const values = Object.fromEntries(
-      [...line.matchAll(/([XYE])\s*(-?\d+(?:\.\d*)?)/gi)].map((m) => [
+      [...line.matchAll(/([XYE])\s*([-+]?(?:\d+(?:\.\d*)?|\.\d+))/gi)].map((m) => [
         m[1]!.toUpperCase(),
         Number(m[2]),
       ]),
