@@ -88,6 +88,66 @@ describe('append slices to a root preview UUID', () => {
     reopened.close();
     expect(await readdir(join(c.dir, 'tmp'))).toEqual([]);
   });
+  it('defaults authenticated print to the appended result plate and compares resolved idempotent options', async () => {
+    const { c, model, root } = await context();
+    const child = await c.jobs.createWithParent(
+      model.id,
+      SliceOptionsSchema.parse({}),
+      undefined,
+      root,
+    );
+    await c.jobs.idle();
+    const fileId = c.jobs.get(child.id).resultFileId!;
+    const key = randomUUID();
+    const first = await c.app.request('/api/printer/print', requestJson('POST', { fileId }, key));
+    expect(first.status).toBe(200);
+    expect(await first.json()).toMatchObject({ state: 'accepted', options: { plate: 2 } });
+    expect(c.adapter.startPrint).toHaveBeenCalledWith(
+      expect.any(String),
+      expect.objectContaining({ plate: 2 }),
+      key,
+    );
+    const repeated = await c.app.request(
+      '/api/printer/print',
+      requestJson('POST', { fileId, options: { plate: 2 } }, key),
+    );
+    expect(repeated.status).toBe(200);
+    expect(c.adapter.startPrint).toHaveBeenCalledOnce();
+    expect(
+      (
+        await c.app.request(
+          '/api/printer/print',
+          requestJson('POST', { fileId, options: { plate: 1 } }, key),
+        )
+      ).status,
+    ).toBe(409);
+    const explicitKey = randomUUID();
+    expect(
+      (
+        await c.app.request(
+          '/api/printer/print',
+          requestJson('POST', { fileId, options: { plate: 1 } }, explicitKey),
+        )
+      ).status,
+    ).toBe(200);
+    expect(c.adapter.startPrint).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ plate: 1 }),
+      explicitKey,
+    );
+    expect(c.adapter.startPrint).toHaveBeenCalledTimes(2);
+    const legacyKey = randomUUID();
+    const legacy = await c.app.request(
+      '/api/printer/print',
+      requestJson('POST', { fileId: root, options: {} }, legacyKey),
+    );
+    expect(legacy.status).toBe(200);
+    expect(c.adapter.startPrint).toHaveBeenLastCalledWith(
+      expect.any(String),
+      expect.objectContaining({ plate: 1 }),
+      legacyKey,
+    );
+  });
   it('returns BadRequest with the root parentId before uploading when a child is specified', async () => {
     const { c, model, root } = await context();
     const child = await c.jobs.createWithParent(
