@@ -1,4 +1,5 @@
 :root {
+  scrollbar-gutter: stable;
   font-family: Inter, 'Noto Sans JP', system-ui, sans-serif;
   color: #dfe8ef;
   background: #0b121b;
@@ -40,6 +41,7 @@ input:focus-visible {
 }
 .app-header {
   height: 76px;
+  flex-shrink: 0;
   display: flex;
   align-items: center;
   padding: 0 32px;
@@ -169,14 +171,25 @@ input:focus-visible {
   background: #4bd5bc;
 }
 .workspace {
+  /* Loading, errors and Viewer share a fixed track; sidebar updates cannot move the list. */
+  --plate-list-height: 0px;
+  --preview-height: max(610px, calc(100vh - 76px - var(--plate-list-height)));
   display: grid;
   grid-template-columns: minmax(0, 1fr) 318px;
+  grid-template-rows: var(--preview-height) var(--plate-list-height);
+  align-content: start;
   flex: 1;
   min-height: calc(100vh - 76px);
+}
+.workspace.has-plates {
+  --plate-list-height: 156px;
 }
 .model-area {
   position: relative;
   min-width: 0;
+  grid-column: 1;
+  grid-row: 1;
+  height: var(--preview-height);
 }
 .viewer {
   height: 100%;
@@ -186,7 +199,7 @@ input:focus-visible {
 .viewport {
   position: relative;
   flex: 1;
-  min-height: 460px;
+  min-height: 0;
   background: radial-gradient(ellipse at 45% 40%, #1b2c3d, #101a25 70%);
 }
 canvas {
@@ -270,6 +283,10 @@ input[type='range'] {
   margin-left: 12px;
 }
 .sidebar {
+  grid-column: 2;
+  grid-row: 1 / 3;
+  min-height: 100%;
+  height: fit-content;
   border-left: 1px solid #26313e;
   padding: 31px 26px;
   background: #0e1722;
@@ -365,7 +382,6 @@ input[type='range'] {
   font-size: 11px;
 }
 .empty-view {
-  min-height: 610px;
   height: 100%;
   display: flex;
   flex-direction: column;
@@ -437,20 +453,19 @@ input[type='range'] {
     display: none;
   }
   .workspace {
+    --preview-height: calc(max(55vh, 320px) + 147px);
     grid-template-columns: 1fr;
+    grid-template-rows: var(--preview-height) var(--plate-list-height) auto;
   }
   .sidebar {
+    grid-column: 1;
+    grid-row: 3;
     border-left: 0;
     border-top: 1px solid #26313e;
     padding: 24px;
   }
   .viewport {
-    height: 55vh;
-    flex: none;
-    min-height: 320px;
-  }
-  .empty-view {
-    min-height: 450px;
+    flex: 1;
   }
   .sidebar .stats {
     grid-template-columns: 1fr 1fr;
@@ -571,6 +586,9 @@ input[type='range'] {
   flex: 1;
 }
 .plate-thumbnails {
+  grid-column: 1;
+  grid-row: 2;
+  height: var(--plate-list-height);
   display: flex;
   gap: 12px;
   padding: 16px 24px;

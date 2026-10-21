@@ -1,6 +1,8 @@
-import { useEffect, useState } from 'react';
-import { errorMessage, fetchPreview } from './api.js';
-import type { HistoryItem, HistoryPage } from './api.js';
+import { useEffect, useRef, useState } from 'react';
+import { Link } from '@tanstack/react-router';
+import { errorMessage } from './api.js';
+import { getHistoryPage } from './preview-queries.js';
+import type { HistoryItem } from './api.js';
 
 function duration(seconds: number | null) {
   if (seconds === null) return '—';
@@ -15,21 +17,21 @@ export function History() {
   const [cursor, setCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const request = useRef<AbortController | null>(null);
+  useEffect(() => {
+    document.title = 'pi_wedge — スライス履歴';
+  }, []);
   useEffect(() => {
     const abort = new AbortController();
+    request.current = abort;
     setLoading(true);
     setError('');
     setItems([]);
     setCursor(null);
     void (async () => {
       try {
-        const page = (await (
-          await fetchPreview(
-            query ? `/history/data?q=${encodeURIComponent(query)}` : '/history/data',
-            { signal: abort.signal },
-          )
-        ).json()) as HistoryPage;
-        if (abort.signal.aborted) return;
+        const page = await getHistoryPage(query, null, abort.signal);
+        abort.signal.throwIfAborted();
         setItems(page.items);
         setCursor(page.nextCursor);
       } catch (cause) {
@@ -38,32 +40,32 @@ export function History() {
         if (!abort.signal.aborted) setLoading(false);
       }
     })();
-    return () => abort.abort();
+    return () => request.current?.abort();
   }, [query]);
   async function more() {
     if (!cursor || loading) return;
+    request.current?.abort();
+    const abort = new AbortController();
+    request.current = abort;
     setLoading(true);
     setError('');
     try {
-      const page = (await (
-        await fetchPreview(
-          `/history/data?cursor=${encodeURIComponent(cursor)}${query ? `&q=${encodeURIComponent(query)}` : ''}`,
-        )
-      ).json()) as HistoryPage;
+      const page = await getHistoryPage(query, cursor, abort.signal);
+      abort.signal.throwIfAborted();
       setItems((current) => [...current, ...page.items]);
       setCursor(page.nextCursor);
     } catch (cause) {
-      setError(errorMessage(cause));
+      if (!abort.signal.aborted) setError(errorMessage(cause));
     } finally {
-      setLoading(false);
+      if (!abort.signal.aborted) setLoading(false);
     }
   }
   return (
     <div className="app-shell">
       <header className="app-header">
-        <a className="brand" href="/history">
+        <Link className="brand" to="/history">
           <span className="brand-symbol">◈</span> pi_wedge
-        </a>
+        </Link>
         <span className="header-tag">スライス履歴</span>
       </header>
       <main className="history-main">
@@ -89,13 +91,16 @@ export function History() {
         {items.length > 0 && (
           <div className="history-list">
             {items.map((item) => (
-              <a
+              <Link
                 className="history-row"
-                href={
-                  item.plateId
-                    ? `/preview/${item.plateId}/${item.previewId}`
-                    : `/preview/${item.id}`
+                to={
+                  item.plateId && item.previewId
+                    ? '/preview/$plateId/$previewId'
+                    : '/preview/$plateId'
                 }
+                params={{ plateId: item.plateId ?? item.id, previewId: item.previewId ?? '' }}
+                // Short/legacy URLs use Hono's canonical UUID redirect.
+                reloadDocument={!item.plateId || !item.previewId}
                 key={item.id}
               >
                 <span className="history-name">
@@ -117,7 +122,7 @@ export function History() {
                 <span className="history-arrow" aria-hidden="true">
                   →
                 </span>
-              </a>
+              </Link>
             ))}
           </div>
         )}

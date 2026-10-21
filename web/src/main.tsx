@@ -1,7 +1,5 @@
 import { createRoot } from 'react-dom/client';
-import { App } from './App.js';
-import { History } from './History.js';
+import { RouterProvider } from '@tanstack/react-router';
+import { router } from './router.js';
 import './style.css';
-createRoot(document.getElementById('root')!).render(
-  window.location.pathname === '/history' ? <History /> : <App />,
-);
+createRoot(document.getElementById('root')!).render(<RouterProvider router={router} />);

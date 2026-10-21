@@ -77,3 +77,7 @@ MCPクライアントには `http://サーバーのLAN-IP:3000/mcp` をStreamabl
 追加スライスの実装: `POST /api/slices`のJSON・multipartに`parentId`として親プレビューの結果UUIDを渡すと、同じプレートUUIDの3MFへ別の枚を追加する。追加結果は新しいプレビューUUIDとなる。子を親として指定すると400となり、`error.parentId`にルートのUUIDを返す。親3MFのダウンロードは最新版、個別のAPIダウンロードと印刷は保存時点の成果物を使用する。[API仕様](docs/api-design.md#親プレビューへの追加スライス)を参照。
 
 追加スライスの検証: `npm run test:slice -- --append MODEL`で実Orca/FreeCAD・S3保存と3枚までの追加を確認し、実HTTPから4枚目を追加してブラウザ表示を確認した。2026-10-21に稼働サービスへ適用済み。自動テスト・ブラウザ・3MF再読込の詳細は[検証記録](docs/verification.md)に記載。追加プレートの実機印刷は未検証。
+
+ルーティングの実装: TanStack Routerの親レイアウトにプレート一覧を保持し、選択中のViewer・統計・印刷操作だけを切り替える。読み込み中も一覧DOM・サムネイル・スクロール位置を維持する。GET取得関数を`web/src/preview-queries.ts`へ集約し、次段階のloader移行条件をコメントと[設計](docs/preview.md#次段階のloader移行)に記録した。今回は取得タイミングをReact effectに残す。
+
+ルーティングの検証: 変更前の`npm run check`（90テスト・ビルド）と実ChromiumのE2E7件、変更後の同チェックとE2E13件が成功。独立レビューで発見した通常スクロールバーと長いAMS欄による横幅・縦スクロールの変動も修正し、回帰テストと独立再測定で確認した。印刷要求はモックで、実機を操作していない。詳細は[検証記録](docs/verification.md)。
