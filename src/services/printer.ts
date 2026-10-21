@@ -9,6 +9,7 @@ import type {
 } from '../domain/schemas.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
+import { listPlates } from '../adapters/gcode.js';
 import { FileService } from './files.js';
 export class PrinterService {
   private busy = false;
@@ -149,6 +150,8 @@ export class PrinterService {
           );
       }
       await this.withFile(fileId, async (path) => {
+        if (!(await listPlates(path)).includes(options.plate))
+          throw new AppError('plate_not_found', 'Plate does not exist', 404);
         const { remotePath } = await this.printer.upload(file, path);
         dispatched = true;
         await this.printer.startPrint(remotePath, options, key);

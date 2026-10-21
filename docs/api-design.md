@@ -33,7 +33,7 @@ OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はロー
 
 `POST /api/slices` の任意の `name` はJSON・multipartの両方で受け付ける。前後空白を除いた1～80文字で、制御文字は拒否する。ジョブと完成した成果物に保存し、履歴・プレビューに表示する。省略時や既存データは元モデルのファイル名を表示する。名前の指定は印刷・スライス設定を変更しない。
 
-`GET /api/files/{uuid}/gcode` と `GET /preview/{uuid}/gcode` は通常G-code、またはコンテナ内の`Metadata/plate_1.gcode`全体を返す。総行数での拒否や途中切り捨てはない。展開後の容量が`MAX_PREVIEW_MB`（既定32MiB、設定範囲1〜32）を超えると413。1行のコメント64KiB・コマンド4KiBやZIP構造の違反は422。元の成果物のダウンロードにはプレビュー容量上限を適用しない。
+`GET /api/files/{uuid}/gcode` と `GET /preview/{uuid}/gcode` は通常G-code、またはコンテナ内の選択した`Metadata/plate_N.gcode`全体を返す。総行数での拒否や途中切り捨てはない。展開後の容量が`MAX_PREVIEW_MB`（既定32MiB、設定範囲1〜32）を超えると413。1行のコメント64KiB・コマンド4KiBやZIP構造の違反は422。元の成果物のダウンロードにはプレビュー容量上限を適用しない。
 
 `POST /mcp` は Streamable HTTP のJSON-RPC入口で、Bearer認証が必要。`pi_wedge_workflow` ツールがサービスの用途、`/docs`・`/openapi.json`、完了したスライスを開く `/preview/{resultFileId}` を案内するだけで、モデルのアップロード・スライス・印刷は実行しない。接続手順とツールの想定利用は [MCPガイド](mcp.md) を参照。
 
@@ -104,3 +104,13 @@ curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/printer/operations/$OP
 ブラウザの設定例は`{"useAms":true,"amsMapping":[0]}`（画面のスロット1）。外部スプールは`{"useAms":false}`または従来の空本文。AMS Lite単色スライスの0〜3だけを許可し、useAmsとmappingの対応を検証する。設定でスライス済み温度・材料やAMS側の登録情報は書き換えない。新しい開始要求はアップロード前にAMS状態を再取得し、装填が確認できないスロットと既知のPLA以外の材料を拒否する。同一キーの再照会は状態取得や機器送信を行わない。
 
 Swaggerの開始API説明は、AIエージェントがモデル、フィラメント設定、AMS使用/スロット/材料/色、ベッドレベリング等をユーザーへ示し確認することを推奨する。ブラウザも選択内容を確認ダイアログに表示する。送信前にキーと供給設定をlocalStorageへ保存し、応答不達・ページ再読込でも元の要求を維持する。確定したfailed後の明示的再試行だけ新しいキーを生成する。
+
+## 複数プレートのプレビュー
+
+`/preview/{plateUUID}/{previewUUID}`が選択状態を表す正規URL。`GET /preview/{plateUUID}`は1枚目へ302でリダイレクトする。旧結果UUIDも同じ入口で解決する。UUID割当はSQLiteに永続化される。
+
+`GET /preview/{uuid}/data`は`plateId`、`previewId`、`plate`（1〜100）、`plates: [{id, plate}]`、選択枚の統計、限定ファイル情報、表示名、印刷設定有無を返す。data/gcode/thumbnailおよびPOST printは任意の`previewId`クエリで枚を選ぶ（省略時は先頭）。所属しないUUIDは404、形式/未知クエリキーは400。`GET /preview/{uuid}/thumbnail`は容量制限付きG-codeの上面図SVGで、最大4096描線。1000行ごとに処理を譲り、要求の中断を確認する。抽出からSVG生成完了までプレビューの同時処理数2に数え、超過は503 `preview_busy`。ブラウザはGETのこのエラーだけを最大30回（待機合計28.75秒）再取得し、プレート切替時に待機も中断する。POSTやその他のエラーを自動再送しない。読取でプリンターは操作しない。
+
+`GET /api/files/{uuid}/gcode?plate=N`はBearer認証を維持し、1〜100の番号を指定できる。番号省略時は最初に存在する枚、通常G-codeは1枚のみ。印刷APIの`options.plate`も1〜100を受け付け、転送前に実在を検証する。ブラウザ印刷本文は従来通りAMS設定のみで、選択プレビューをサーバーが保存済みファイルと番号へ解決する。印刷冪等キーの永続性と不明結果の再送禁止を維持する。
+
+履歴はSQLiteだけを読み、ストレージ本体を取得しない。初回プレビューでIDを割り当て済みの項目には結果UUIDに加え`plateId`、`previewId`、`plateCount`を返す。未初期化の項目は結果UUIDだけを返し、画面は従来の`/preview/{resultUUID}`へリンクする。本体の欠落やストレージ障害があっても、履歴にある他の結果を表示できる。公開範囲は名前・日時・形式・統計・UUID・枚数のみ。元モデル、スライス設定、認証トークンは返さない。

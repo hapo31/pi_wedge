@@ -3,12 +3,16 @@ import { mkdirSync } from 'node:fs';
 import { dirname } from 'node:path';
 import type {
   FileMetadata,
+  PlateSet,
+  PlatePreview,
   PrintOperation,
   SliceJob,
   StopPrintOperation,
 } from '../domain/schemas.js';
 type Records = {
   file: FileMetadata;
+  plateSet: PlateSet;
+  platePreview: PlatePreview;
   job: SliceJob & { reservedResultId: string };
   operation: PrintOperation;
   stopOperation: StopPrintOperation;
@@ -44,6 +48,34 @@ export class Repository {
         payload: string;
       }[]
     ).map((r) => JSON.parse(r.payload) as Records[K]);
+  }
+  plateSetForFile(fileId: string): PlateSet | null {
+    const row = this.db
+      .prepare(
+        "SELECT payload FROM records WHERE kind='plateSet' AND json_extract(payload,'$.rootFileId')=?",
+      )
+      .get(fileId) as { payload: string } | undefined;
+    return row ? (JSON.parse(row.payload) as PlateSet) : null;
+  }
+  previews(plateId: string): PlatePreview[] {
+    return (
+      this.db
+        .prepare(
+          "SELECT payload FROM records WHERE kind='platePreview' AND json_extract(payload,'$.plateId')=? ORDER BY json_extract(payload,'$.plate')",
+        )
+        .all(plateId) as { payload: string }[]
+    ).map((row) => JSON.parse(row.payload) as PlatePreview);
+  }
+  transaction<T>(fn: () => T): T {
+    this.db.exec('BEGIN IMMEDIATE');
+    try {
+      const value = fn();
+      this.db.exec('COMMIT');
+      return value;
+    } catch (error) {
+      this.db.exec('ROLLBACK');
+      throw error;
+    }
   }
   readySlices(
     limit: number,

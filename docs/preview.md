@@ -2,7 +2,7 @@
 
 画面に表示する文言は[開発規約の「ユーザー向け文言」](../AGENTS.md#ユーザー向け文言)に従う。画面と利用目的から伝わる説明を省き、冗長な表現や誇張を加えない。
 
-React + TypeScript、Three.jsベースの[gcode-preview](https://github.com/xyz-tools/gcode-preview)を採用。テキストG-codeを解析・描画するので.gcode.3mfはサーバーのyauzlアダプターでMetadata/plate_1.gcodeを抽出。複数プレートは初期スコープ外。ZIPをディスクへ展開せず、エントリ数・compressed/uncompressed size・実読取byteを制限。暗号化、不正構造、期待パス不存在は422。
+React + TypeScript、Three.jsベースの[gcode-preview](https://github.com/xyz-tools/gcode-preview)を採用。テキストG-codeを解析・描画するので.gcode.3mfはサーバーのyauzlアダプターで選択した`Metadata/plate_N.gcode`を抽出する。最大100枚、番号の欠番に対応する。ZIPをディスクへ展開せず、エントリ数・compressed/uncompressed size・実読取byteを制限。暗号化、不正構造、期待パス不存在は422。
 
 `/preview/{uuid}`: 大きな3D viewport、右側ファイル名/UUID/推定時間/材料/接続状態、下部レイヤースライダー。180×180×180mm build volume、回転/ズーム/pan、単一レイヤー/積層表示、travel toggle。印刷は別の目立つボタン→ネイティブ確認ダイアログ→API、実行中disable、恒久冪等キー使用。unknownは成功と表示しない。
 
@@ -27,3 +27,11 @@ AIから受け取った `/preview/{uuid}` を開くだけで、指定した表�
 Orca/Prusa系のCHANGE_LAYER/LAYER_CHANGEがある場合、開始前のパージ押出をプレビュー入力から除去し、起動時の移動/押出モードを保持する。実成果物の100レイヤー20mm cubeで層表示を検証。コメントのない通常G-codeはライブラリのZ/押出による層推定を利用する。
 
 印刷ボタン上にAMS Lite接続状態と各スロットの材料・色・装填状態・使用中の供給元を表示する。更新ボタンで状態を読み直す。外部スプール/AMSとスロットを今回の印刷に選択できる。空・状態不明・既知のPLA以外のスロットは選べない。読み取り失敗は接続済みと表示せず、選択済みAMSでの新規開始を無効にする。送信中・受付済み・結果不明・応答不達時は設定を固定し、キーと設定をlocalStorageへ保持する。
+
+## 複数プレートとUUID
+
+3MFをまとめるプレートUUIDと、各枚を選ぶプレビューUUIDをSQLiteに保存する。正規URLは`/preview/{plateUUID}/{previewUUID}`。`/preview/{plateUUID}`は1枚目へ302、従来の結果UUIDだけのURLも対応するネストURLへ302で移動する。ID欄で両UUIDを参照でき、履歴には割当済みの両IDと枚数を返す。初回プレビュー時に既存結果にもIDを割り当て、その後は変えない。履歴はSQLiteだけを読み、未初期化の結果は従来のUUIDリンクを使う。オブジェクトの取得失敗で一覧全体を止めない。
+
+複数枚の場合だけ3Dビュー下部に各枚のサムネイルを表示する。ヘッドレスOrcaがPNGを含まない場合も扱えるよう、G-codeから上面図を生成し、描線は最大4096本に間引く。生成は1000行単位で処理を譲り、中断を確認する。抽出からSVG生成まで同時処理上限2を維持する。ブラウザは1枚ずつ取得する。切替直後に旧処理が残った場合、GETの503 `preview_busy`だけを最大30回（待機合計28.75秒）再取得し、切替時は待機も中断する。切替・直接アクセス・再読込・戻る/進むはネストしたプレビューUUIDに従い、統計・レイヤー・確認対象を切り替える。指定枚の不在や別プレートへの所属は404。印刷の保存キーはプレビューUUIDごとに独立させ、変更前の結果不明操作を自動再送しない。
+
+ブラウザのdata/gcode/thumbnail/printはプレートUUIDに任意の`previewId`クエリを添えて選択する。本文のAMS限定、Origin、容量上限は維持する。公開dataは限定したファイル情報と各UUID・番号・統計だけで、スライス設定と元モデルIDは含めない。ダウンロードはプレート全体、印刷は選択したプレビューの保存済み成果物の該当G-codeを使う。

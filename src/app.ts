@@ -14,6 +14,7 @@ import type { ContentfulStatusCode } from 'hono/utils/http-status';
 import type { Services } from './bootstrap.js';
 import {
   ErrorResponse,
+  PlateQuery,
   FileSchema,
   JobSchema,
   OperationSchema,
@@ -71,6 +72,7 @@ const SliceMultipart = z
   })
   .strict();
 export function createApp(services?: Services & { ready?: boolean }) {
+  let browserPreview: PreviewService | undefined;
   const app = new OpenAPIHono({
     defaultHook: (result, c) => {
       if (!result.success)
@@ -709,8 +711,8 @@ export function createApp(services?: Services & { ready?: boolean }) {
         operationId: 'getPreviewGcode',
         security: secured,
         summary: 'Get bounded text G-code for browser preview',
-        description: `Extracts the full Metadata/plate_1.gcode from gcode.3mf or reads plain G-code. Limit ${services.config.MAX_PREVIEW_MB} MiB after decompression; no total line-count limit. Larger artifacts remain downloadable/printable. No physical printer side effects. Invalid ZIP/toolpath returns 422.`,
-        request: { params: fileParams },
+        description: `Extracts the selected plate G-code (query plate, default first available) from gcode.3mf or reads plain G-code. Limit ${services.config.MAX_PREVIEW_MB} MiB after decompression; no total line-count limit. Larger artifacts remain downloadable/printable. No physical printer side effects. Invalid ZIP/toolpath returns 422.`,
+        request: { params: fileParams, query: PlateQuery },
         responses: {
           200: {
             description: 'UTF-8 G-code text for preview',
@@ -723,9 +725,13 @@ export function createApp(services?: Services & { ready?: boolean }) {
       }),
       async (c) => {
         c.header('Cache-Control', 'no-store');
-        return c.text(await preview.text(c.req.valid('param').uuid), 200);
+        return c.text(
+          await preview.text(c.req.valid('param').uuid, c.req.valid('query').plate),
+          200,
+        );
       },
     );
+    browserPreview = preview;
     registerPreviewRoutes(app, services, preview);
   }
   const webRoot = resolve('dist/web');
@@ -735,17 +741,42 @@ export function createApp(services?: Services & { ready?: boolean }) {
       method: 'get',
       path: '/preview/{uuid}',
       operationId: 'openPreview',
-      summary: 'Open the browser preview shell',
+      summary: 'Open the first preview in a plate set',
       description:
-        'Trusted LAN preview: open this URL to load paths/layers/statistics automatically, without token entry. Browser data/print routes are scoped to this UUID. Physical printing occurs only after the separate confirmed same-origin print action.',
+        'Trusted LAN. A plate UUID redirects to its first preview at /preview/{plateUUID}/{previewUUID}. Legacy result UUIDs redirect to the matching preview. No physical action.',
       request: { params: fileParams },
+      responses: {
+        302: { description: 'Canonical nested preview URL' },
+        400: errors[400],
+        404: errors[404],
+        409: errors[409],
+        503: errors[503],
+      },
+    }),
+    async (c) => {
+      if (!browserPreview || services?.ready === false)
+        throw new AppError('dependency_unavailable', 'Preview unavailable', 503);
+      const { group, selected } = await browserPreview.selection(c.req.valid('param').uuid);
+      c.header('Cache-Control', 'no-store');
+      return c.redirect(`/preview/${group.id}/${selected.id}`, 302);
+    },
+  );
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/preview/{uuid}/{previewUuid}',
+      operationId: 'openPlatePreview',
+      security: [],
+      summary: 'Open one preview in a plate set',
+      description:
+        'Trusted LAN preview shell. Membership is checked by the data endpoints. No physical action.',
+      request: { params: z.object({ uuid: Uuid, previewUuid: Uuid }) },
       responses: {
         200: {
           description: 'React preview page',
           content: { 'text/html': { schema: z.string() } },
         },
         400: errors[400],
-        404: errors[404],
         503: errors[503],
       },
     }),

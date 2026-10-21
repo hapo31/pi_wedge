@@ -1,10 +1,11 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { setup, MODEL, TOKEN, requestJson } from './helpers.js';
 import { SliceOptionsSchema } from '../src/domain/schemas.js';
 
 const contexts: Array<Awaited<ReturnType<typeof setup>>> = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const context of contexts.splice(0)) await context.close();
 });
 async function context() {
@@ -14,6 +15,38 @@ async function context() {
 }
 
 describe('LAN slice history', () => {
+  it('reads SQLite summaries during object failures and leaves uninitialized plate IDs lazy', async () => {
+    const c = await context();
+    const model = await c.files.upload(new File([MODEL], 'source.stl'));
+    const ids: string[] = [];
+    for (const name of ['initialized', 'uninitialized']) {
+      const job = c.jobs.create(model.id, SliceOptionsSchema.parse({}), name);
+      await c.jobs.idle();
+      ids.push(c.jobs.get(job.id).resultFileId!);
+    }
+    const initialized = await (await c.app.request(`/preview/${ids[0]}/data`)).json();
+    await c.storage.delete(ids[1]!);
+    const head = vi.spyOn(c.storage, 'head').mockRejectedValue(new Error('storage unavailable'));
+    const get = vi.spyOn(c.storage, 'get').mockRejectedValue(new Error('storage unavailable'));
+    const response = await c.app.request('/history/data');
+    expect(response.status).toBe(200);
+    const { items } = await response.json();
+    expect(items).toHaveLength(2);
+    expect(items.find((item: { id: string }) => item.id === ids[0])).toMatchObject({
+      plateId: initialized.plateId,
+      previewId: ids[0],
+      plateCount: 1,
+    });
+    const uninitialized = items.find((item: { id: string }) => item.id === ids[1]);
+    expect(uninitialized).toMatchObject({ id: ids[1], name: 'uninitialized' });
+    expect(uninitialized).not.toHaveProperty('plateId');
+    expect(uninitialized).not.toHaveProperty('previewId');
+    expect(uninitialized).not.toHaveProperty('plateCount');
+    expect(c.repository.all('plateSet')).toHaveLength(1);
+    expect(head).not.toHaveBeenCalled();
+    expect(get).not.toHaveBeenCalled();
+  });
+
   it('lists only ready slice summaries without a token and uses the supplied JSON name', async () => {
     const c = await context();
     const model = await c.files.upload(new File([MODEL], 'source.stl'));

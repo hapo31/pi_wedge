@@ -2,6 +2,7 @@ import { lazy, Suspense, useCallback, useEffect, useMemo, useState } from 'react
 const Viewer = lazy(() => import('./Viewer.js').then((module) => ({ default: module.Viewer })));
 import { ApiError, fetchPreview, readLimitedText, errorMessage } from './api.js';
 import type { Metadata, Operation, PreviewData } from './api.js';
+import { PlateThumbnails } from './PlateThumbnails.js';
 import { AmsSettings } from './AmsSettings.js';
 import type { PrinterStatus, BrowserPrintSettings } from './api.js';
 import { PrintController } from './print-controller.js';
@@ -13,7 +14,39 @@ function duration(seconds: number | null) {
   return minutes >= 60 ? `${Math.floor(minutes / 60)}時間 ${minutes % 60}分` : `${minutes}分`;
 }
 export function App() {
-  const uuid = window.location.pathname.split('/').filter(Boolean).at(-1) ?? '';
+  const [path, setPath] = useState(window.location.pathname);
+  useEffect(() => {
+    const onPop = () => setPath(window.location.pathname);
+    window.addEventListener('popstate', onPop);
+    return () => window.removeEventListener('popstate', onPop);
+  }, []);
+  const [, uuid = '', previewId = ''] = path.split('/').filter(Boolean);
+  return (
+    <PreviewScreen
+      key={path}
+      uuid={uuid}
+      previewId={previewId}
+      onSelect={(plateId, id) => {
+        const next = `/preview/${plateId}/${id}`;
+        window.history.pushState({}, '', next);
+        setPath(next);
+      }}
+    />
+  );
+}
+function PreviewScreen({
+  uuid,
+  previewId,
+  onSelect,
+}: {
+  uuid: string;
+  previewId: string;
+  onSelect: (plateId: string, previewId: string) => void;
+}) {
+  const plateQuery = previewId ? `?previewId=${previewId}` : '';
+  const [plates, setPlates] = useState<{ id: string; plate: number }[]>([]);
+  const [selectedPlate, setSelectedPlate] = useState(1);
+  const [plateId, setPlateId] = useState(uuid);
   const validUuid = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(uuid);
   const [file, setFile] = useState<Metadata | null>(null),
     [displayName, setDisplayName] = useState(''),
@@ -32,8 +65,8 @@ export function App() {
   const controller = useMemo(
     () =>
       new PrintController(
-        async (fileId, key, settings) => {
-          const response = await fetch(`/preview/${fileId}/print`, {
+        async (_fileId, key, settings) => {
+          const response = await fetch(`/preview/${uuid}/print${plateQuery}`, {
             method: 'POST',
             headers: {
               'Idempotency-Key': key,
@@ -52,7 +85,7 @@ export function App() {
         setPrintState,
         (_settings, message) => window.confirm(message ?? '印刷しますか？'),
       ),
-    [],
+    [plateQuery],
   );
   useEffect(() => {
     if (!validUuid) return;
@@ -62,20 +95,26 @@ export function App() {
     setText('');
     setFile(null);
     setReady(false);
-    const saved = controller.restore(uuid);
-    setSelectedSlot(saved.useAms ? (saved.amsMapping?.[0] ?? null) : null);
+    setPrinterEnabled(false);
+
     void (async () => {
       try {
         const data = (await (
-          await fetchPreview(`/preview/${uuid}/data`, { signal: abort.signal })
+          await fetchPreview(`/preview/${uuid}/data${plateQuery}`, { signal: abort.signal })
         ).json()) as PreviewData;
+        abort.signal.throwIfAborted();
+        setPlates(data.plates ?? [{ id: previewId, plate: 1 }]);
+        setSelectedPlate(data.plate ?? 1);
+        setPlateId(data.plateId ?? uuid);
+        const saved = controller.restore(previewId || uuid);
+        setSelectedSlot(saved.useAms ? (saved.amsMapping?.[0] ?? null) : null);
         const metadata = data.file;
         setFile(metadata);
         setDisplayName(data.displayName);
         if (metadata.state !== 'ready' || !['gcode', 'gcode.3mf'].includes(metadata.format))
           throw new Error('このファイルはプレビューできません。');
         setPrinterEnabled(data.printerEnabled === true);
-        const response = await fetchPreview(`/preview/${uuid}/gcode`, {
+        const response = await fetchPreview(`/preview/${uuid}/gcode${plateQuery}`, {
           signal: abort.signal,
         });
         const gcode = await readLimitedText(response, abort.signal);
@@ -88,7 +127,7 @@ export function App() {
       }
     })();
     return () => abort.abort();
-  }, [uuid, validUuid, controller]);
+  }, [uuid, validUuid, controller, previewId, plateQuery]);
   useEffect(() => {
     if (!file || !printerEnabled) return;
     const abort = new AbortController();
@@ -124,7 +163,7 @@ export function App() {
       (!selected.material || selected.material.toUpperCase() === 'PLA'));
   const settings: BrowserPrintSettings =
     selectedSlot === null ? { useAms: false } : { useAms: true, amsMapping: [selectedSlot] };
-  const confirmation = `印刷しますか？\n${displayName}\n供給元: ${selectedSlot === null ? '外部スプール' : `AMS スロット${selectedSlot + 1} · ${selected?.material ?? '材料未取得'} · ${selected?.color ?? '色未取得'}`}\nスライス設定: Generic PLA\nベッドレベリング: 有効\nベッドが空で、材料とプレートが合っていることを確認してください。`;
+  const confirmation = `印刷しますか？\n${displayName}${plates.length > 1 ? `\nプレート ${selectedPlate}` : ''}\n供給元: ${selectedSlot === null ? '外部スプール' : `AMS スロット${selectedSlot + 1} · ${selected?.material ?? '材料未取得'} · ${selected?.color ?? '色未取得'}`}\nスライス設定: Generic PLA\nベッドレベリング: 有効\nベッドが空で、材料とプレートが合っていることを確認してください。`;
   async function download() {
     try {
       const response = await fetchPreview(`/preview/${uuid}/download`);
@@ -166,7 +205,7 @@ export function App() {
                 </div>
               }
             >
-              <Viewer text={text} onReady={onViewerReady} />
+              <Viewer key={previewId} text={text} onReady={onViewerReady} />
             </Suspense>
           ) : (
             <div className="empty-view">
@@ -184,6 +223,15 @@ export function App() {
                 </p>
               )}
             </div>
+          )}
+          {plates.length > 1 && (
+            <PlateThumbnails
+              uuid={plateId}
+              plates={plates}
+              selected={previewId}
+              disabled={printState.busy}
+              onSelect={(id) => onSelect(plateId, id)}
+            />
           )}
           {text && error && (
             <p className="inline-error" role="alert">
@@ -211,6 +259,19 @@ export function App() {
               </small>
             </div>
           </div>
+          {file && (
+            <details className="preview-ids">
+              <summary>ID</summary>
+              <dl>
+                <dt>プレート</dt>
+                <dd>
+                  <a href={`/preview/${plateId}`}>{plateId}</a>
+                </dd>
+                <dt>プレビュー</dt>
+                <dd>{previewId}</dd>
+              </dl>
+            </details>
+          )}
           <div className="machine-card">
             <span>プリンター</span>
             <strong>Bambu Lab A1 mini</strong>
@@ -242,7 +303,7 @@ export function App() {
                 printState.operation?.state === 'accepted' ||
                 printState.operation?.state === 'unknown'
               }
-              onClick={() => void controller.start(uuid, settings, confirmation)}
+              onClick={() => void controller.start(previewId || uuid, settings, confirmation)}
             >
               {printState.busy
                 ? '送信中…'

@@ -4,12 +4,26 @@ import { Transform } from 'node:stream';
 import type { Readable } from 'node:stream';
 import { setImmediate } from 'node:timers/promises';
 import { AppError } from '../domain/errors.js';
-export function openGcode(
-  path: string,
-  format: 'gcode' | 'gcode.3mf',
-  maxBytes: number,
-): Promise<Readable> {
-  if (format === 'gcode') return Promise.resolve(bounded(createReadStream(path), maxBytes));
+export const MAX_PLATES = 100;
+export async function listPlates(path: string): Promise<number[]> {
+  const { zip, entries } = await openArchive(path);
+  try {
+    const plates = entries
+      .flatMap((entry) => {
+        const match = entry.fileName.match(/^Metadata\/plate_([1-9]\d*)\.gcode$/);
+        if (!match) return [];
+        const plate = Number(match[1]);
+        if (plate > MAX_PLATES) throw new AppError('invalid_archive', 'Plate limit exceeded', 422);
+        return [plate];
+      })
+      .sort((a, b) => a - b);
+    if (!plates.length) throw new AppError('missing_gcode', 'Container has no plate G-code', 422);
+    return plates;
+  } finally {
+    zip.close();
+  }
+}
+export function openArchive(path: string): Promise<{ zip: yauzl.ZipFile; entries: yauzl.Entry[] }> {
   return new Promise((resolve, reject) => {
     yauzl.open(
       path,
@@ -19,62 +33,76 @@ export function openGcode(
           reject(new AppError('invalid_archive', 'Invalid 3MF ZIP archive', 422));
           return;
         }
-        let count = 0,
-          done = false;
-        const fail = (error: unknown) => {
-          if (!done) {
-            done = true;
-            zip.close();
-            reject(
-              error instanceof AppError
-                ? error
-                : new AppError('invalid_archive', 'Invalid 3MF ZIP archive', 422),
-            );
-          }
+        const entries: yauzl.Entry[] = [];
+        const names = new Set<string>();
+        const fail = () => {
+          zip.close();
+          reject(
+            new AppError(
+              'invalid_archive',
+              'Invalid, duplicate, encrypted or excessive ZIP entries',
+              422,
+            ),
+          );
         };
         zip.on('error', fail);
-        zip.on('end', () =>
-          fail(new AppError('missing_gcode', 'Container must contain Metadata/plate_1.gcode', 422)),
-        );
+        zip.on('end', () => resolve({ zip, entries }));
         zip.on('entry', (entry) => {
-          if (++count > 2000) {
-            fail(new AppError('invalid_archive', 'Archive entry count limit exceeded', 422));
+          if (
+            entries.length >= 2000 ||
+            names.has(entry.fileName) ||
+            entry.generalPurposeBitFlag & 1
+          ) {
+            fail();
             return;
           }
-          if (entry.fileName !== 'Metadata/plate_1.gcode') {
-            zip.readEntry();
-            return;
-          }
-          if (entry.generalPurposeBitFlag & 1) {
-            fail(new AppError('invalid_archive', 'Encrypted G-code is unsupported', 422));
-            return;
-          }
-          if (!entry.uncompressedSize) {
-            fail(new AppError('invalid_gcode', 'Empty G-code', 422));
-            return;
-          }
-          if (entry.uncompressedSize > maxBytes) {
-            fail(new AppError('too_large', 'G-code size limit exceeded', 413));
-            return;
-          }
-          zip.openReadStream(entry, (streamError, stream) => {
-            if (streamError || !stream) {
-              fail(streamError);
-              return;
-            }
-            done = true;
-            const out = bounded(stream, maxBytes);
-            out.once('close', () => {
-              stream.destroy();
-              zip.close();
-            });
-            resolve(out);
-          });
+          names.add(entry.fileName);
+          entries.push(entry);
+          zip.readEntry();
         });
         zip.readEntry();
       },
     );
   });
+}
+export async function openGcode(
+  path: string,
+  format: 'gcode' | 'gcode.3mf',
+  maxBytes: number,
+  plate = 1,
+): Promise<Readable> {
+  if (!Number.isInteger(plate) || plate < 1 || plate > MAX_PLATES)
+    throw new AppError('invalid_request', 'Invalid plate number', 400);
+  if (format === 'gcode') {
+    if (plate !== 1) throw new AppError('plate_not_found', 'Plate does not exist', 404);
+    return bounded(createReadStream(path), maxBytes);
+  }
+  const { zip, entries } = await openArchive(path);
+  try {
+    const entry = entries.find((entry) => entry.fileName === `Metadata/plate_${plate}.gcode`);
+    if (!entry) throw new AppError('missing_gcode', 'Requested plate G-code does not exist', 422);
+    if (!entry.uncompressedSize) throw new AppError('invalid_gcode', 'Empty G-code', 422);
+    if (entry.uncompressedSize > maxBytes)
+      throw new AppError('too_large', 'G-code size limit exceeded', 413);
+    return await new Promise<Readable>((resolve, reject) => {
+      zip.openReadStream(entry, (error, stream) => {
+        if (error || !stream) {
+          reject(new AppError('invalid_archive', 'Invalid 3MF ZIP archive', 422));
+          return;
+        }
+        const out = bounded(stream, maxBytes);
+        zip.on('error', (error) => out.destroy(error));
+        out.once('close', () => {
+          stream.destroy();
+          zip.close();
+        });
+        resolve(out);
+      });
+    });
+  } catch (error) {
+    zip.close();
+    throw error;
+  }
 }
 function bounded(source: Readable, limit: number): Readable {
   let bytes = 0;

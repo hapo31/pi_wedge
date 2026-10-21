@@ -561,3 +561,67 @@ input[type='range'] {
 .ams-slot .slot-active {
   color: #4bd5bc;
 }
+
+.model-area {
+  display: flex;
+  flex-direction: column;
+}
+.model-area > .viewer,
+.model-area > .empty-view {
+  flex: 1;
+}
+.plate-thumbnails {
+  display: flex;
+  gap: 12px;
+  padding: 16px 24px;
+  overflow-x: auto;
+  background: #121c28;
+  border-top: 1px solid #26313e;
+}
+.plate-thumbnails button {
+  flex: 0 0 128px;
+  padding: 6px;
+  border: 1px solid #344657;
+  border-radius: 6px;
+  background: #101a25;
+  color: #a3b3c2;
+  font-size: 12px;
+}
+.plate-thumbnails button[aria-pressed='true'] {
+  border-color: #4bd5bc;
+  color: #4bd5bc;
+}
+.plate-thumbnails img,
+.thumbnail-placeholder {
+  display: block;
+  width: 100%;
+  height: 90px;
+}
+.thumbnail-placeholder {
+  padding: 25px;
+  font-size: 24px;
+}
+.history-plates {
+  display: inline-block;
+  margin-left: 10px;
+  padding: 3px 6px;
+  border: 1px solid #344657;
+  border-radius: 4px;
+  color: #4bd5bc;
+  font-size: 11px;
+}
+.preview-ids {
+  color: #8398ac;
+  font-size: 11px;
+}
+.preview-ids summary {
+  cursor: pointer;
+}
+.preview-ids dd {
+  margin: 6px 0 12px;
+  overflow-wrap: anywhere;
+  font-family: monospace;
+}
+.preview-ids a {
+  color: inherit;
+}
