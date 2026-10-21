@@ -43,16 +43,36 @@ export class ApiError extends Error {
   }
 }
 export async function fetchPreview(path: string, init: RequestInit = {}) {
-  const response = await fetch(path, init);
-  if (!response.ok) {
+  const canRetry = (init.method ?? 'GET').toUpperCase() === 'GET';
+  for (let attempt = 0; ; attempt++) {
+    init.signal?.throwIfAborted();
+    const response = await fetch(path, init);
+    if (response.ok) return response;
     const body = await response.json().catch(() => null);
-    throw new ApiError(
+    const error = new ApiError(
       response.status,
       body?.error?.code ?? 'request_failed',
       body?.error?.message ?? `HTTP ${response.status}`,
     );
+    if (!canRetry || error.status !== 503 || error.code !== 'preview_busy' || attempt >= 30)
+      throw error;
+    await retryDelay(Math.min(250 * 2 ** attempt, 1000), init.signal);
   }
-  return response;
+}
+function retryDelay(milliseconds: number, signal?: AbortSignal | null) {
+  return new Promise<void>((resolve, reject) => {
+    const abort = () => {
+      clearTimeout(timer);
+      signal?.removeEventListener('abort', abort);
+      reject(signal?.reason ?? new DOMException('Aborted', 'AbortError'));
+    };
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', abort);
+      resolve();
+    }, milliseconds);
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+  });
 }
 export function errorMessage(error: unknown) {
   if (error instanceof ApiError) {

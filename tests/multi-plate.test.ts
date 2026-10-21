@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
 import { readdir, writeFile } from 'node:fs/promises';
@@ -6,8 +6,11 @@ import { join } from 'node:path';
 import { setup, MODEL, GCODE, storedEntries, TOKEN } from './helpers.js';
 import { Repository } from '../src/adapters/repository.js';
 import { listPlates } from '../src/adapters/gcode.js';
+import { PreviewService } from '../src/services/preview.js';
+import * as thumbnails from '../src/services/thumbnail.js';
 const contexts: Awaited<ReturnType<typeof setup>>[] = [];
 afterEach(async () => {
+  vi.restoreAllMocks();
   for (const c of contexts.splice(0)) await c.close();
 });
 async function context() {
@@ -31,6 +34,38 @@ async function context() {
   return { c, id, second };
 }
 describe('persistent multi-plate previews', () => {
+  it('holds the processing budget through thumbnail generation and releases it after cancellation', async () => {
+    const { c, id } = await context();
+    const service = new PreviewService(c.files, c.dir, 32 * 1048576);
+    const { group } = await service.selection(id);
+    const generate = thumbnails.toolpathThumbnail;
+    let release: () => void = () => {};
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const generator = vi
+      .spyOn(thumbnails, 'toolpathThumbnail')
+      .mockImplementation(async (...args) => {
+        await gate;
+        return generate(...args);
+      });
+    const abort = new AbortController();
+    const first = service.thumbnail(group.id, id, abort.signal);
+    const second = service.thumbnail(group.id, id);
+    const cancelled = expect(first).rejects.toMatchObject({ name: 'AbortError' });
+    try {
+      await vi.waitFor(() => expect(generator).toHaveBeenCalledTimes(2));
+      await expect(service.details(group.id, id)).rejects.toMatchObject({ code: 'preview_busy' });
+      abort.abort();
+    } finally {
+      release();
+    }
+    await cancelled;
+    expect(await second).toContain('<svg');
+    expect(await service.selectedText(group.id, id)).toBe(GCODE);
+    expect(await readdir(join(c.dir, 'preview-tmp'))).toEqual([]);
+  });
+
   it('redirects legacy/group URLs, persists both UUIDs and exposes only preview metadata', async () => {
     const { c, id } = await context();
     const data = await (await c.app.request(`/preview/${id}/data`)).json();

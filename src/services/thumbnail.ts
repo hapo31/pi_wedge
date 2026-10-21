@@ -1,5 +1,8 @@
+import { setImmediate } from 'node:timers/promises';
+
 // A bounded top view also covers headless Orca exports without embedded PNGs.
-export function toolpathThumbnail(text: string) {
+export async function toolpathThumbnail(text: string, signal?: AbortSignal) {
+  signal?.throwIfAborted();
   let x = 0,
     y = 0,
     e = 0,
@@ -9,8 +12,13 @@ export function toolpathThumbnail(text: string) {
     seen = 0;
   let segments: number[][] = [];
   const marker = /;\s*(?:CHANGE_LAYER|LAYER_CHANGE)\b/.exec(text);
-  let offset = 0;
+  let offset = 0,
+    lines = 0;
   while (offset < text.length) {
+    if (++lines % 1000 === 0) {
+      await setImmediate();
+      signal?.throwIfAborted();
+    }
     const end = text.indexOf('\n', offset);
     const line =
       text
@@ -46,6 +54,7 @@ export function toolpathThumbnail(text: string) {
     y = ny;
     e = ne;
   }
+  signal?.throwIfAborted();
   let minX = Infinity,
     minY = Infinity,
     maxX = -Infinity,

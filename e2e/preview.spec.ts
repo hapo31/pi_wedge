@@ -299,6 +299,7 @@ test('switches thumbnail previews with nested URLs, history navigation and indep
   const secondId = 'a8979c43-b9a6-4d6d-a733-7347800130af';
   const plateId = 'b8979c43-b9a6-4d6d-a733-7347800130af';
   const keys: string[] = [];
+  let secondDataRequests = 0;
   await page.route(
     /\/preview\/[^/]+\/(?:data|gcode|printer|print|download|thumbnail)(?:\?.*)?$/,
     (route) => {
@@ -320,6 +321,11 @@ test('switches thumbnail previews with nested URLs, history navigation and indep
         keys.push(route.request().headers()['idempotency-key']!);
         return route.fulfill({ json: { id: keys.at(-1), state: 'accepted', error: null } });
       }
+      if (url.pathname.endsWith('/data') && selected === secondId && ++secondDataRequests === 1)
+        return route.fulfill({
+          status: 503,
+          json: { error: { code: 'preview_busy', message: 'Previous plate is still processing' } },
+        });
       if (url.pathname.endsWith('/data'))
         return route.fulfill({
           json: {
@@ -360,6 +366,7 @@ test('switches thumbnail previews with nested URLs, history navigation and indep
   await expect(page).toHaveURL(`/preview/${plateId}/${secondId}`);
   await expect(slider).toHaveAttribute('max', '3');
   await expect(page.getByText('5分', { exact: true })).toBeVisible();
+  expect(secondDataRequests).toBe(2);
   await expect(page.getByRole('button', { name: '印刷', exact: true })).toBeEnabled();
   await page.goBack();
   await expect(page).toHaveURL(`/preview/${plateId}/${id}`);

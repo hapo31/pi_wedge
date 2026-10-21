@@ -16,7 +16,6 @@ import {
   HistoryResponseSchema,
   SliceNameSchema,
 } from './domain/schemas.js';
-import { toolpathThumbnail } from './services/thumbnail.js';
 import type { PreviewService } from './services/preview.js';
 
 const params = z.object({ uuid: Uuid });
@@ -63,7 +62,7 @@ export function registerPreviewRoutes(
       security: [],
       summary: 'List ready slices on the trusted LAN',
       description:
-        'Public on the trusted LAN. Returns up to 24 ready slice summaries in newest-first order. Optional q searches display names and source model filenames; cursor is the last result UUID from the previous page. No model bodies, settings, tokens, printer state or physical side effects.',
+        'Public on the trusted LAN. Reads SQLite only and returns up to 24 ready slice summaries in newest-first order. Plate IDs/counts are included after first preview access; otherwise use the result UUID URL. Optional q searches display names and source model filenames; cursor is the last result UUID from the previous page. No model bodies, settings, tokens, printer state or physical side effects.',
       request: {
         query: z.object({ cursor: Uuid.optional(), q: SliceNameSchema.optional() }).strict(),
       },
@@ -163,7 +162,7 @@ export function registerPreviewRoutes(
       security: [],
       summary: 'Read a bounded top view of the selected plate',
       description:
-        'Trusted LAN, ready slice only. Generates a top view from the selected plate G-code with at most 4096 sampled segments; no model bodies, settings or physical action.',
+        'Trusted LAN, ready slice only. Generates a top view from the selected plate G-code with at most 4096 sampled segments. Generation yields in bounded batches, supports cancellation and shares the two-preview processing limit; busy returns 503 preview_busy. No model bodies, settings or physical action.',
       request: { params, query: PreviewSelectionQuery },
       responses: {
         200: {
@@ -174,12 +173,13 @@ export function registerPreviewRoutes(
       },
     }),
     async (c) => {
-      const text = await preview.selectedText(
+      const svg = await preview.thumbnail(
         c.req.valid('param').uuid,
         c.req.valid('query').previewId,
+        c.req.raw.signal,
       );
       c.header('Content-Type', 'image/svg+xml');
-      return c.body(toolpathThumbnail(text), 200);
+      return c.body(svg, 200);
     },
   );
   app.openapi(

@@ -109,8 +109,8 @@ Swaggerの開始API説明は、AIエージェントがモデル、フィラメ�
 
 `/preview/{plateUUID}/{previewUUID}`が選択状態を表す正規URL。`GET /preview/{plateUUID}`は1枚目へ302でリダイレクトする。旧結果UUIDも同じ入口で解決する。UUID割当はSQLiteに永続化される。
 
-`GET /preview/{uuid}/data`は`plateId`、`previewId`、`plate`（1〜100）、`plates: [{id, plate}]`、選択枚の統計、限定ファイル情報、表示名、印刷設定有無を返す。data/gcode/thumbnailおよびPOST printは任意の`previewId`クエリで枚を選ぶ（省略時は先頭）。所属しないUUIDは404、形式/未知クエリキーは400。`GET /preview/{uuid}/thumbnail`は容量制限付きG-codeの上面図SVGで、最大4096描線。読取でプリンターは操作しない。
+`GET /preview/{uuid}/data`は`plateId`、`previewId`、`plate`（1〜100）、`plates: [{id, plate}]`、選択枚の統計、限定ファイル情報、表示名、印刷設定有無を返す。data/gcode/thumbnailおよびPOST printは任意の`previewId`クエリで枚を選ぶ（省略時は先頭）。所属しないUUIDは404、形式/未知クエリキーは400。`GET /preview/{uuid}/thumbnail`は容量制限付きG-codeの上面図SVGで、最大4096描線。1000行ごとに処理を譲り、要求の中断を確認する。抽出からSVG生成完了までプレビューの同時処理数2に数え、超過は503 `preview_busy`。ブラウザはGETのこのエラーだけを最大30回（待機合計28.75秒）再取得し、プレート切替時に待機も中断する。POSTやその他のエラーを自動再送しない。読取でプリンターは操作しない。
 
 `GET /api/files/{uuid}/gcode?plate=N`はBearer認証を維持し、1〜100の番号を指定できる。番号省略時は最初に存在する枚、通常G-codeは1枚のみ。印刷APIの`options.plate`も1〜100を受け付け、転送前に実在を検証する。ブラウザ印刷本文は従来通りAMS設定のみで、選択プレビューをサーバーが保存済みファイルと番号へ解決する。印刷冪等キーの永続性と不明結果の再送禁止を維持する。
 
-履歴の各項目には結果UUIDに加え`plateId`、`previewId`、`plateCount`を返す。公開範囲は名前・日時・形式・統計・UUID・枚数のみ。元モデル、スライス設定、認証トークンは返さない。
+履歴はSQLiteだけを読み、ストレージ本体を取得しない。初回プレビューでIDを割り当て済みの項目には結果UUIDに加え`plateId`、`previewId`、`plateCount`を返す。未初期化の項目は結果UUIDだけを返し、画面は従来の`/preview/{resultUUID}`へリンクする。本体の欠落やストレージ障害があっても、履歴にある他の結果を表示できる。公開範囲は名前・日時・形式・統計・UUID・枚数のみ。元モデル、スライス設定、認証トークンは返さない。

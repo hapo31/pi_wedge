@@ -6,6 +6,7 @@ import { openGcode, inspectGcode, listPlates } from '../adapters/gcode.js';
 import { AppError, logError } from '../domain/errors.js';
 import { FileService } from './files.js';
 import { PlateNumber, Uuid } from '../domain/schemas.js';
+import { toolpathThumbnail } from './thumbnail.js';
 export class PreviewService {
   private active = 0;
   constructor(
@@ -106,11 +107,21 @@ export class PreviewService {
     const { selected } = await this.selection(id, previewId);
     return this.text(selected.fileId, selected.sourcePlate);
   }
+  async thumbnail(id: string, previewId?: string, signal?: AbortSignal) {
+    signal?.throwIfAborted();
+    const { selected } = await this.selection(id, previewId);
+    const file = this.file(selected.fileId);
+    return this.withFile(file.id, async (path) => {
+      signal?.throwIfAborted();
+      const text = await this.readText(path, file.format, selected.sourcePlate);
+      return toolpathThumbnail(text, signal);
+    });
+  }
   private assertPlate(plates: number[], plate: number) {
     PlateNumber.parse(plate);
     if (!plates.includes(plate)) throw new AppError('plate_not_found', 'Plate does not exist', 404);
   }
-  async history(cursor?: string, query?: string) {
+  history(cursor?: string, query?: string) {
     let before: { id: string; createdAt: string } | undefined;
     if (cursor) {
       const file = this.file(Uuid.parse(cursor));
@@ -119,12 +130,18 @@ export class PreviewService {
     const page = this.files.repository.readySlices(25, before, query);
     const items = [];
     for (const file of page.slice(0, 24)) {
-      const { group, previews } = await this.selection(file.id);
+      const repository = this.files.repository;
+      const preview = repository.get('platePreview', file.id);
+      const group = preview
+        ? repository.get('plateSet', preview.plateId)
+        : repository.plateSetForFile(file.id);
+      const previews = group ? repository.previews(group.id) : [];
+      const selected = preview ?? previews[0];
       items.push({
         id: file.id,
-        plateId: group.id,
-        previewId: previews.find((p) => p.id === file.id)?.id ?? previews[0]!.id,
-        plateCount: previews.length,
+        ...(group && selected
+          ? { plateId: group.id, previewId: selected.id, plateCount: previews.length }
+          : {}),
         name: file.displayName ?? this.files.metadata(file.sourceModelId!).name,
         createdAt: file.createdAt,
         format: file.format as 'gcode' | 'gcode.3mf',
@@ -136,32 +153,33 @@ export class PreviewService {
   }
   async text(id: string, plate?: number) {
     const file = this.file(id);
-    return this.withFile(id, async (path) => {
-      const plates = file.format === 'gcode.3mf' ? await listPlates(path) : [1];
-      const selected = plate ?? plates[0]!;
-      this.assertPlate(plates, selected);
-      const stream = await openGcode(path, file.format, this.maxBytes, selected),
-        chunks: Buffer[] = [];
-      let bytes = 0;
-      try {
-        for await (const chunk of stream) {
-          const buffer = Buffer.from(chunk);
-          bytes += buffer.length;
-          if (bytes > this.maxBytes)
-            throw new AppError(
-              'too_large',
-              'Preview exceeds size limit; download the full artifact instead',
-              413,
-            );
-          chunks.push(buffer);
-        }
-      } finally {
-        stream.destroy();
+    return this.withFile(id, (path) => this.readText(path, file.format, plate));
+  }
+  private async readText(path: string, format: 'gcode' | 'gcode.3mf', plate?: number) {
+    const plates = format === 'gcode.3mf' ? await listPlates(path) : [1];
+    const selected = plate ?? plates[0]!;
+    this.assertPlate(plates, selected);
+    const stream = await openGcode(path, format, this.maxBytes, selected),
+      chunks: Buffer[] = [];
+    let bytes = 0;
+    try {
+      for await (const chunk of stream) {
+        const buffer = Buffer.from(chunk);
+        bytes += buffer.length;
+        if (bytes > this.maxBytes)
+          throw new AppError(
+            'too_large',
+            'Preview exceeds size limit; download the full artifact instead',
+            413,
+          );
+        chunks.push(buffer);
       }
-      const buffer = Buffer.concat(chunks, bytes);
-      await inspectGcode(Readable.from(buffer));
-      return buffer.toString('utf8');
-    });
+    } finally {
+      stream.destroy();
+    }
+    const buffer = Buffer.concat(chunks, bytes);
+    await inspectGcode(Readable.from(buffer));
+    return buffer.toString('utf8');
   }
   private async withFile<T>(id: string, fn: (path: string) => Promise<T>) {
     this.file(id);
