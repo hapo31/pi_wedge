@@ -89,8 +89,21 @@ export function History() {
         {items.length > 0 && (
           <div className="history-list">
             {items.map((item) => (
-              <a className="history-row" href={`/preview/${item.id}`} key={item.id}>
-                <span className="history-name">{item.name}</span>
+              <a
+                className="history-row"
+                href={
+                  item.plateId
+                    ? `/preview/${item.plateId}/${item.previewId}`
+                    : `/preview/${item.id}`
+                }
+                key={item.id}
+              >
+                <span className="history-name">
+                  {item.name}
+                  {item.plateCount && item.plateCount > 1 ? (
+                    <small className="history-plates">{item.plateCount}枚</small>
+                  ) : null}
+                </span>
                 <time dateTime={item.createdAt}>
                   {new Date(item.createdAt).toLocaleString('ja-JP', {
                     dateStyle: 'medium',

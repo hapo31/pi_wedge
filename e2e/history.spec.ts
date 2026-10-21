@@ -13,6 +13,9 @@ test('shows ready slices and opens the selected preview without token input', as
             : [
                 {
                   id,
+                  plateId: id,
+                  previewId: id,
+                  plateCount: 2,
                   name: '収納ケースのふた',
                   createdAt: '2026-10-19T03:00:00.000Z',
                   format: 'gcode.3mf',
@@ -28,7 +31,7 @@ test('shows ready slices and opens the selected preview without token input', as
   await expect(page.getByRole('heading', { name: 'スライス履歴' })).toBeVisible();
   await expect(page.getByRole('link', { name: /収納ケースのふた/ })).toHaveAttribute(
     'href',
-    `/preview/${id}`,
+    `/preview/${id}/${id}`,
   );
   await expect(page.getByText('42分')).toBeVisible();
   await expect(page.getByText('12.4 g')).toBeVisible();

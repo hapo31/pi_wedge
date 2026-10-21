@@ -16,9 +16,16 @@ export type PreviewData = {
   file: Metadata;
   displayName: string;
   printerEnabled: boolean;
+  plate: number;
+  plateId: string;
+  previewId: string;
+  plates: { id: string; plate: number }[];
 };
 export type HistoryItem = {
   id: string;
+  plateId?: string;
+  previewId?: string;
+  plateCount?: number;
   name: string;
   createdAt: string;
   format: 'gcode' | 'gcode.3mf';
@@ -50,6 +57,8 @@ export async function fetchPreview(path: string, init: RequestInit = {}) {
 export function errorMessage(error: unknown) {
   if (error instanceof ApiError) {
     switch (error.code) {
+      case 'plate_not_found':
+        return 'プレートが見つかりません。URLを確認してください。';
       case 'printer_status_unavailable':
         return 'AMSの状態を取得できません。接続を確認して更新してください。';
       case 'ams_slot_unavailable':

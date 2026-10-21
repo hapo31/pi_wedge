@@ -16,35 +16,48 @@ export const MODEL =
 export const GCODE =
   '; estimated printing time (normal mode) = 1m 2s\n; filament used [g] = 1.2\n; filament used [mm] = 340\nG21\nG90\nM83\nG1 Z0.2\nG1 X10 Y10 F1200\nG1 X20 Y10 E1\nG1 X20 Y20 E1\nG1 Z0.4\nG1 X10 Y20 E1\n';
 export function storedZip(name: string, body: Buffer) {
-  let crc = 0xffffffff;
-  for (const byte of body) {
-    crc ^= byte;
-    for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+  return storedEntries([[name, body]]);
+}
+export function storedEntries(entries: [string, Buffer][]) {
+  const files: Buffer[] = [],
+    directory: Buffer[] = [];
+  let offset = 0;
+  for (const [name, body] of entries) {
+    let crc = 0xffffffff;
+    for (const byte of body) {
+      crc ^= byte;
+      for (let i = 0; i < 8; i++) crc = (crc >>> 1) ^ (crc & 1 ? 0xedb88320 : 0);
+    }
+    crc = (crc ^ 0xffffffff) >>> 0;
+    const n = Buffer.from(name),
+      header = Buffer.alloc(30);
+    header.writeUInt32LE(0x04034b50);
+    header.writeUInt16LE(20, 4);
+    header.writeUInt32LE(crc, 14);
+    header.writeUInt32LE(body.length, 18);
+    header.writeUInt32LE(body.length, 22);
+    header.writeUInt16LE(n.length, 26);
+    const central = Buffer.alloc(46);
+    central.writeUInt32LE(0x02014b50);
+    central.writeUInt16LE(20, 4);
+    central.writeUInt16LE(20, 6);
+    central.writeUInt32LE(crc, 16);
+    central.writeUInt32LE(body.length, 20);
+    central.writeUInt32LE(body.length, 24);
+    central.writeUInt16LE(n.length, 28);
+    central.writeUInt32LE(offset, 42);
+    files.push(header, n, body);
+    directory.push(central, n);
+    offset += header.length + n.length + body.length;
   }
-  crc = (crc ^ 0xffffffff) >>> 0;
-  const n = Buffer.from(name),
-    header = Buffer.alloc(30);
-  header.writeUInt32LE(0x04034b50);
-  header.writeUInt16LE(20, 4);
-  header.writeUInt32LE(crc, 14);
-  header.writeUInt32LE(body.length, 18);
-  header.writeUInt32LE(body.length, 22);
-  header.writeUInt16LE(n.length, 26);
-  const central = Buffer.alloc(46);
-  central.writeUInt32LE(0x02014b50);
-  central.writeUInt16LE(20, 4);
-  central.writeUInt16LE(20, 6);
-  central.writeUInt32LE(crc, 16);
-  central.writeUInt32LE(body.length, 20);
-  central.writeUInt32LE(body.length, 24);
-  central.writeUInt16LE(n.length, 28);
-  const end = Buffer.alloc(22);
+  const central = Buffer.concat(directory),
+    end = Buffer.alloc(22);
   end.writeUInt32LE(0x06054b50);
-  end.writeUInt16LE(1, 8);
-  end.writeUInt16LE(1, 10);
-  end.writeUInt32LE(central.length + n.length, 12);
-  end.writeUInt32LE(header.length + n.length + body.length, 16);
-  return Buffer.concat([header, n, body, central, n, end]);
+  end.writeUInt16LE(entries.length, 8);
+  end.writeUInt16LE(entries.length, 10);
+  end.writeUInt32LE(central.length, 12);
+  end.writeUInt32LE(offset, 16);
+  return Buffer.concat([...files, central, end]);
 }
 export async function setup(
   overrides: {

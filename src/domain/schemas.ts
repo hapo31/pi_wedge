@@ -1,5 +1,26 @@
 import { z } from '@hono/zod-openapi';
 export const Uuid = z.string().uuid().openapi({ example: '0198cdf0-b8f1-4de0-8d67-2d9e95ed019c' });
+export const PlateNumber = z.number().int().min(1).max(100);
+export const PlateQuery = z
+  .object({
+    plate: z
+      .string()
+      .regex(/^[1-9]\d{0,2}$/)
+      .transform(Number)
+      .pipe(PlateNumber)
+      .optional(),
+  })
+  .strict();
+export const PreviewSelectionQuery = z.object({ previewId: Uuid.optional() }).strict();
+export const PreviewPlateSchema = z.object({ id: Uuid, plate: PlateNumber });
+export type PlateSet = { id: string; rootFileId: string; fileId: string; createdAt: string };
+export type PlatePreview = {
+  id: string;
+  plateId: string;
+  fileId: string;
+  plate: number;
+  sourcePlate: number;
+};
 export const ErrorInfo = z.object({ code: z.string(), message: z.string() });
 export const ErrorResponse = z.object({ error: ErrorInfo }).openapi('ErrorResponse');
 export const SliceNameSchema = z
@@ -76,6 +97,9 @@ export type SliceJob = z.infer<typeof JobSchema>;
 export const HistoryItemSchema = z
   .object({
     id: Uuid,
+    plateId: Uuid.optional(),
+    previewId: Uuid.optional(),
+    plateCount: z.number().int().positive().optional(),
     name: z.string(),
     createdAt: z.string().datetime(),
     format: z.enum(['gcode', 'gcode.3mf']),
@@ -91,7 +115,7 @@ export const HistoryResponseSchema = z
   .openapi('SliceHistoryPage');
 export const PrintOptionsSchema = z
   .object({
-    plate: z.literal(1).default(1),
+    plate: PlateNumber.default(1),
     bedLeveling: z.boolean().default(true),
     flowCalibration: z.boolean().default(false),
     vibrationCalibration: z.boolean().default(false),

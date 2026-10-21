@@ -69,3 +69,7 @@ MCPクライアントには `http://サーバーのLAN-IP:3000/mcp` をStreamabl
 ## AMS Liteの供給設定
 
 プレビューの印刷ボタン上でAMS接続状態・4スロットの装填/材料/色・使用中の供給元を確認し、外部スプールまたはAMSスロットを今回の印刷に選択できる。固定のGeneric PLAスライスに対応した単色設定で、温度やAMS側のフィラメント登録を書き換える操作ではない。AI用の取得はBearer付き`GET /api/printer/status`。Swaggerの開始APIには設定内容をユーザーへ提示して確認する推奨を記載。実装と検証の詳細は[検証記録](docs/verification.md)を参照。
+
+複数プレートの実装: `/preview/{plateUUID}/{previewUUID}`で各枚を選び、下部サムネイル・統計・レイヤーを切り替える。プレートUUIDのみのURLは1枚目へリダイレクトする。履歴には枚数を表示し、プレビューのID欄で両UUIDを確認できる。従来の結果UUIDのURLも利用可能。
+
+複数プレートの検証: 自動テスト・実ブラウザの結果は[検証記録](docs/verification.md)へ記録する。複数枚の実機印刷は未検証。

@@ -6,7 +6,8 @@ import type { Services } from './bootstrap.js';
 import { AppError } from './domain/errors.js';
 import {
   ErrorResponse,
-  FileSchema,
+  PreviewSelectionQuery,
+  PreviewPlateSchema,
   OperationSchema,
   PrintOptionsSchema,
   BrowserPrintSchema,
@@ -15,6 +16,7 @@ import {
   HistoryResponseSchema,
   SliceNameSchema,
 } from './domain/schemas.js';
+import { toolpathThumbnail } from './services/thumbnail.js';
 import type { PreviewService } from './services/preview.js';
 
 const params = z.object({ uuid: Uuid });
@@ -76,7 +78,8 @@ export function registerPreviewRoutes(
         503: errors[503],
       },
     }),
-    (c) => c.json(preview.history(c.req.valid('query').cursor, c.req.valid('query').q), 200),
+    async (c) =>
+      c.json(await preview.history(c.req.valid('query').cursor, c.req.valid('query').q), 200),
   );
   app.openapi(
     createRoute({
@@ -87,14 +90,30 @@ export function registerPreviewRoutes(
       summary: 'Load a LAN preview without token entry',
       description:
         'Public on the trusted LAN. Returns ready slice metadata, chosen display name or original model filename, and printer availability for this UUID only. Does not expose the model body or API token. No physical printer action.',
-      request: { params },
+      request: { params, query: PreviewSelectionQuery },
       responses: {
         200: {
           description: 'Preview statistics and printer availability',
           content: {
             'application/json': {
               schema: z
-                .object({ file: FileSchema, displayName: z.string(), printerEnabled: z.boolean() })
+                .object({
+                  file: z.object({
+                    id: Uuid,
+                    name: z.string(),
+                    format: z.enum(['gcode', 'gcode.3mf']),
+                    state: z.literal('ready'),
+                    estimatedSeconds: z.number().nullable(),
+                    filamentGrams: z.number().nullable(),
+                    filamentMillimeters: z.number().nullable(),
+                  }),
+                  displayName: z.string(),
+                  printerEnabled: z.boolean(),
+                  plateId: Uuid,
+                  previewId: Uuid,
+                  plate: z.number().int(),
+                  plates: z.array(PreviewPlateSchema),
+                })
                 .openapi('BrowserPreviewData'),
             },
           },
@@ -102,10 +121,10 @@ export function registerPreviewRoutes(
         ...errors,
       },
     }),
-    (c) =>
+    async (c) =>
       c.json(
         {
-          ...preview.details(c.req.valid('param').uuid),
+          ...(await preview.details(c.req.valid('param').uuid, c.req.valid('query').previewId)),
           printerEnabled: services.config.PRINTER_ENABLED,
         },
         200,
@@ -118,8 +137,8 @@ export function registerPreviewRoutes(
       operationId: 'getBrowserPreviewGcode',
       security: [],
       summary: 'Read the selected slice toolpath without token entry',
-      description: `Public on the trusted LAN. Extracts the full G-code for this slice UUID only. Limit ${services.config.MAX_PREVIEW_MB} MiB after decompression; no total line-count limit. No physical printer action.`,
-      request: { params },
+      description: `Public on the trusted LAN. Extracts the full G-code for previewId within this plate UUID (default first available). Limit ${services.config.MAX_PREVIEW_MB} MiB after decompression; no total line-count limit. No physical printer action.`,
+      request: { params, query: PreviewSelectionQuery },
       responses: {
         200: {
           description: 'Bounded G-code text',
@@ -130,7 +149,38 @@ export function registerPreviewRoutes(
         ...errors,
       },
     }),
-    async (c) => c.text(await preview.text(c.req.valid('param').uuid), 200),
+    async (c) =>
+      c.text(
+        await preview.selectedText(c.req.valid('param').uuid, c.req.valid('query').previewId),
+        200,
+      ),
+  );
+  app.openapi(
+    createRoute({
+      method: 'get',
+      path: '/preview/{uuid}/thumbnail',
+      operationId: 'getBrowserPlateThumbnail',
+      security: [],
+      summary: 'Read a bounded top view of the selected plate',
+      description:
+        'Trusted LAN, ready slice only. Generates a top view from the selected plate G-code with at most 4096 sampled segments; no model bodies, settings or physical action.',
+      request: { params, query: PreviewSelectionQuery },
+      responses: {
+        200: {
+          description: 'Plate thumbnail',
+          content: { 'image/svg+xml': { schema: z.string() } },
+        },
+        ...errors,
+      },
+    }),
+    async (c) => {
+      const text = await preview.selectedText(
+        c.req.valid('param').uuid,
+        c.req.valid('query').previewId,
+      );
+      c.header('Content-Type', 'image/svg+xml');
+      return c.body(toolpathThumbnail(text), 200);
+    },
   );
   app.openapi(
     createRoute({
@@ -154,8 +204,8 @@ export function registerPreviewRoutes(
     }),
     async (c) => {
       const id = c.req.valid('param').uuid;
-      preview.file(id);
-      const { file, stream } = await services.files.download(id);
+      const { group } = await preview.selection(id);
+      const { file, stream } = await services.files.download(group.fileId);
       return new Response(Readable.toWeb(stream) as ReadableStream<Uint8Array>, {
         headers: {
           'Content-Type': 'application/octet-stream',
@@ -186,7 +236,7 @@ export function registerPreviewRoutes(
       },
     }),
     async (c) => {
-      preview.file(c.req.valid('param').uuid);
+      await preview.selection(c.req.valid('param').uuid);
       if (!services.config.PRINTER_ENABLED)
         throw new AppError('printer_disabled', 'Printer is not configured', 503);
       return c.json(await services.printer.status(), 200);
@@ -226,9 +276,10 @@ export function registerPreviewRoutes(
       security: [],
       summary: 'Start the previewed print after explicit browser confirmation',
       description:
-        'PHYSICAL SIDE EFFECT: uploads, heats and moves the printer. Trusted LAN browser action, no token entry. Origin must match the request origin; cross-origin and missing-Origin requests are rejected and CORS is not enabled. Send an empty body for external-spool defaults, or application/json with useAms and one zero-based amsMapping slot (0–3), plus an Idempotency-Key UUID. The selected supply source must be shown in the browser confirmation. Other print options use defaults and the same persistent PrinterService as the authenticated API. pending → accepted/failed/unknown. accepted is command ACK, not completed printing. Repeat the same key to read the prior result; never automatically retry with a new key.',
+        'PHYSICAL SIDE EFFECT: uploads, heats and moves the printer. Trusted LAN browser action, no token entry. Origin must match the request origin; cross-origin and missing-Origin requests are rejected and CORS is not enabled. Send an empty body for external-spool defaults, or application/json with useAms and one zero-based amsMapping slot (0–3), plus an Idempotency-Key UUID. The selected supply source must be shown in the browser confirmation. Query previewId selects the confirmed preview within the plate set (default first available). Other print options use defaults and the same persistent PrinterService as the authenticated API. pending → accepted/failed/unknown. accepted is command ACK, not completed printing. Repeat the same key to read the prior result; never automatically retry with a new key.',
       request: {
         params,
+        query: PreviewSelectionQuery,
         headers: z.object({
           Origin: z.url().openapi({ example: 'http://raspberrypi.local:3000' }),
           'Idempotency-Key': Uuid,
@@ -267,12 +318,15 @@ export function registerPreviewRoutes(
         }
         settings = BrowserPrintSchema.parse(body);
       }
-      preview.file(c.req.valid('param').uuid);
+      const { selected } = await preview.selection(
+        c.req.valid('param').uuid,
+        c.req.valid('query').previewId,
+      );
       if (!services.config.PRINTER_ENABLED)
         throw new AppError('printer_disabled', 'Printer is not configured', 503);
       const op = await services.printer.print(
-        c.req.valid('param').uuid,
-        PrintOptionsSchema.parse(settings),
+        selected.fileId,
+        PrintOptionsSchema.parse({ ...settings, plate: selected.sourcePlate }),
         c.req.valid('header')['Idempotency-Key'],
       );
       return c.json(op, op.state === 'unknown' ? 504 : op.state === 'failed' ? 502 : 200);
