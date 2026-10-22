@@ -11,6 +11,7 @@
 ## 重大な不確定事項と判断
 
 - Handy併用を維持する印刷経路は[2026-10-22の技術調査](cloud-printing-research.md)を参照。クラウド印刷は未実装・未検証。ConnectのPC確認付き受け渡しは試作候補だが、Pi単体でページから開始する経路は認可済みAPIの提供条件を確認する必要がある。Fleet HubはHandyと併用できず対象外。
+- [Connect詳細調査](bambu-connect-research.md)で公式URL・配布・直近リリースを確認。Windows/Mac中継と、その画面をスマホから操作する構成は候補だが未実装・未検証。現行3MFの読込互換性と、選択プレート・AMS供給設定を引き継げない公開URLの制約を先に検証する。
 - Orca ARM64配布物はUbuntu 24.04向け。Pi OSのglibc/GTK互換、ヘッドレス初期化、処理時間/メモリは対象OS上で検証が必要。失敗時は同じSlicer契約で別ビルド/スライサーへ交換。
 - A1 miniのLANプロトコルは公開された安定公式APIではない。FTPS990/MQTT8883を候補にし、LAN Only/Developer Modeと実ファームウェアで確認。署名を回避する実装は行わない。
 - .gcode.3mfを標準印刷成果物とし、通常G-codeはプレビュー/ダウンロード用。ZIP内のplate_1.gcodeと実印刷可能性を別に検証。

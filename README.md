@@ -37,6 +37,8 @@ Orca/FreeCAD導入と`npm run profiles:prepare`は[スライサー手順](docs/s
 
 LAN Onlyを使わずBambu Handyと併用する方式を[技術調査](docs/cloud-printing-research.md)に記録。クラウド印刷は未実装・未検証。Bambu Connectへの受け渡しはPCでの最終確認が必要で、Pi単体・スマホのページ内で完結する認可済み経路は未確認。
 
+Connectの公式URL仕様・対応OS・3MF互換性と、PC中継・スマホからの遠隔操作案は[詳細調査](docs/bambu-connect-research.md)を参照。中継と遠隔操作は未実装・未検証。
+
 スライス履歴の実装: `/history` にreadyの結果を新しい順で24件ずつ表示し、名前・元ファイル名で検索してプレビューへ移動できる。任意の `name` をJSON・multipartのスライス要求で指定できる。既存結果は元モデル名を表示する。
 
 スライス履歴の検証: `npm run check`（70テスト・ビルド）と `npm run test:e2e`（実Chromium6テスト）が成功。稼働サービスにも反映し、保存済み結果の一覧・検索・390px幅を実Chromiumで確認した。実機スライス・印刷は今回実行していない。詳細は[検証記録](docs/verification.md)。
