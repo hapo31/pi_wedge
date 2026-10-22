@@ -55,6 +55,10 @@ DockerCommandRunnerがジョブ領域・プロファイル・固定の変換ス�
 
 結合は[Orca v2.4.2の3MF実装](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/Format/bbs_3mf.cpp)と[プレート座標実装](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/slic3r/GUI/PartPlate.cpp)に合わせ、既存G-code/md5は変更しない。モデルのオブジェクトIDと外部モデルパスを重複なく付け替え、model_settings/slice_info/filament_sequence/relationshipsを更新する。A1 miniの180mmベッド・1.2倍間隔・平方根切上げの列数でモデル配置を更新する。印刷用G-codeの座標は変えない。既存設定は保持し、新規枚は今回のスライス設定で生成済みのG-codeを使う。
 
+Bambu Studio/Orcaの共有形状キャッシュは外部モデルのパスを含めず数値IDだけをキーにする。そのため、親を含む全外部`.model`の形状IDをコンテナ全体で一意に振り直し、componentのobjectid/UUID、形状UUID、model_settingsのpart IDとmesh_sharedを同時に更新する。以前の結合処理で作った親も追加時に補正する。形状XMLはストリームで走査し、オブジェクトの開始タグだけを書き換える。頂点・三角形のバイト列は保持し、8MiBを超える形状もメモリへ一括展開しない。
+
+保存済みのサーバー生成3MFは、`python3 scripts/append-plate.py --repair INPUT OUTPUT MAX_BYTES`で別ファイルへ修復できる。出力先は新規ファイルに限り、元のファイル・G-code/md5・モデル配置・スライス設定は変更しない。ストレージへの反映はこのスクリプトの対象外。反映時は元の成果物とSQLiteをバックアップし、staging→保存・照合→readyの順序とサイズメタデータの更新が必要。
+
 ZIPを展開せずにコピーし、2000エントリ、番号100、XML/JSON各8MiB、展開後合計MAX_ARTIFACT_MBの8倍、圧縮後MAX_ARTIFACT_MBの上限を検証する。暗号化・重複名・不正パス・DTD/実体宣言を拒否。新しい集合参照はストレージ保存後にSQLiteで確定し、途中の成果物はジョブ領域と共に清掃する。
 
 追加の実CLI試験は`npm run test:slice -- --append MODEL`。通常の1枚に続いて2枚追加し、同じプレートUUID、各結果UUID、選択G-code、元のG-code不変を検証する。専用DATA_DIRを使い、実ストレージへ保存するが印刷はしない。検証結果は[verification.md](verification.md)を参照。

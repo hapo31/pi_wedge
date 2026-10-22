@@ -258,6 +258,32 @@ AMS供給設定は今回の単色スライスで使う供給元/スロットの�
 
 反映後の結果は`/tmp/pi-wedge-router-deploy/live-http-result.json`、`live-browser-result.json`、画像は同ディレクトリの`live-desktop.png`と`live-mobile.png`。バックアップはディレクトリ0700、SQLite0600でGit管理外に保存した。
 
+## 複数プレート3MFの形状ID修正と保存済みデータの修復（2026-10-22）
+
+原因: 追加時に外部`.model`のパスとルートオブジェクトIDだけを変更し、形状IDは全枚で`1`のままコピーしていた。[Bambu Studioの読込実装](https://github.com/bambulab/BambuStudio/blob/master/src/libslic3r/Format/bbs_3mf.cpp)と[Orca v2.4.2](https://github.com/OrcaSlicer/OrcaSlicer/blob/v2.4.2/src/libslic3r/Format/bbs_3mf.cpp)の`_generate_volumes`はパスを含めず数値IDで共有形状を検索するため、後続枚が先頭の形状を再利用する。プレビューは各枚のG-codeを使うため、この不具合が表示に現れなかった。従来の結合テストと実Orca再読込は同じ20mm立方体の追加であり、異なる形状の保持を検証できていなかった。
+
+修正: 親も含む全外部モデルの形状IDを一意にし、componentの参照とUUID、形状UUID、model_settingsのpart IDとmesh_sharedを同期する。既存の不具合を含む親への追加も補正する。`--repair`は別ファイルへ同じ補正を行う。形状XMLはストリームで走査し、開始タグ以外の頂点・三角形のバイト列を保持する。
+
+- `npm run check`: 型/Lint/Format・94テスト・サーバー/UIビルド成功。サンドボックス内では従来の子プロセステスト2件で標準出力が空になったため、制限外で全チェックを実行した。
+- 回帰テスト: 20/30/40mmの異なる形状の追加、旧3MFでの先頭形状複製の再現と修復、旧親への追加、複数part、修復の再実行、8MiB超の形状、DTD/実体宣言の拒否を確認。G-code/md5・配置・設定と形状の頂点/三角形を保持することも確認した。
+- 実CLI/S3: `DATA_DIR=/tmp/pi-wedge-3mf-fix/cli-smoke-final PRINTER_ENABLED=false npm run test:slice -- --append .data/integration/cube.stl`が成功。Orca2.4.2の既存ARM64 Docker環境で1→2→3枚の3ジョブがsucceeded。元G-codeの一致、各枚の読取、プレートUUIDの維持を確認した。これは同じ立方体のスモークテストで、異なる形状の確認は次項の保存済み実データで行った。
+- 保存済み実データ: 「V4 01 本体／02 トレー／03 前面機構」の2枚・3枚入り3MFをS3からバックアップして修復。全ZIPエントリを照合し、変更がモデルの参照/ID/UUIDと設定のpart参照に限られること、G-code/md5・形状本体・配置・プロジェクト設定が不変であることを確認した。元3枚入り3MFの実Orca `--info`は終了コード139、修復後と稼働URLからの再ダウンロードは終了コード0で、以下の異なる3形状がいずれもmanifoldとして読み込めた。
+
+| 枚  | 形状     | 寸法 X × Y × Z (mm)            | facets |
+| --- | -------- | ------------------------------ | ------ |
+| 1   | 本体     | 134 × 128.399994 × 178         | 2120   |
+| 2   | トレー   | 127.199997 × 175.5 × 23.700001 | 4898   |
+| 3   | 前面機構 | 166.699997 × 125.5 × 8         | 4794   |
+
+稼働データへの反映: queued/runningジョブとpending/unknown印刷・停止操作が0件であることを更新直前にも確認。SQLiteと元3MFを`/tmp/pi-wedge-3mf-fix`へバックアップし、対象をstagingへ変更してからObjectStorage経由で保存、サイズ/SHA-256の再読取照合後にreadyへ戻した。失敗時に元オブジェクトとメタデータを復元する手順を用意して実行した。ディレクトリ0700、元3MFとSQLite0600、Git管理外。対象UUIDは2枚入り`a39da2f4-e237-4810-822c-de63a466bf88`と3枚入り`0d80138c-30fd-413c-b22b-74d554e4be1c`で、既存URLとUUIDは維持した。
+
+- プレビュー集合`770ef9a9-e243-42d4-9501-c7c346c5c3d4`と従来の親UUIDからのダウンロードは200、3,822,208bytes。認証付きの2枚入り個別ダウンロードも200、3,456,654bytes。Content-Lengthと修復ファイルのSHA-256が一致した。
+- 稼働中の各プレートのdataは200、各G-codeのSHA-256は更新前と一致。`/health`・認証付き`/api/ready`・`/history/data`も200だった。
+- SQLiteは229レコードで件数不変。バックアップとの差分は対象2ファイルのsizeのみ（3,456,644→3,456,654、3,822,206→3,822,208）。ジョブ・印刷操作・集合・プレビューを含め他のフィールドは一致し、`quick_check`はok。
+- 結合スクリプトは実行時にホストからDockerへ読み取り専用マウントされるため、新規追加にも修正が反映される。HTTP/UIコードは変更せず、サービスの再起動は行っていない。
+
+検証ログ、元/修復済み3MF、修復ジャーナル、HTTP照合結果は`/tmp/pi-wedge-3mf-fix`へ保存した。Bambu StudioのGUIでの表示・再編集と実機印刷は未検証。転送・加熱・印刷・停止操作は実行していない。
+
 ## TanStack Queryとloader移行（2026-10-22）
 
 実装: `@tanstack/react-query` 5.104.5を固定して追加。メタデータ・G-code・AMS・履歴・サムネイルの通信開始を4か所のeffectからQueryへ移した。子loaderはQueryObserverの購読を取得し、成功後に画面へ渡す。ルート中止時は購読を解除し、同じqueryを必要とする他の購読がなければ通信と503再試行待機を中断する。履歴は初期ページを含めて`useInfiniteQuery`へ統合した。取得はZodで検証したURL検索語で分離し、追加ページ失敗時は既存ページを保持する。
