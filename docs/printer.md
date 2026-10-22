@@ -1,5 +1,7 @@
 # A1 mini LAN通信
 
+LAN Onlyを使わずHandyと併用する方式は[技術調査（2026-10-22）](cloud-printing-research.md)を参照。現行実装は以下のLAN用アダプターで、クラウド印刷は未実装・未検証。
+
 FTPS（implicit TLS :990）で.gcode.3mfを転送、MQTT TLS :8883 / device/{serial}/requestにproject_fileをpublish、device/{serial}/reportで応答を読む。ユーザーbblp、アクセスコードとIP/serialはenv、ログに出さない。basic-ftp/mqttはJavaScript実装でARM64追加バイナリ不要。
 
 これは公式安定APIではない。[ha-bambulabの通信実装](https://github.com/greghesp/ha-bambulab/tree/main/custom_components/bambu_lab/pybambu)を互換性の参考とする。[Bambu公式方針](https://blog.bambulab.com/updates-and-third-party-integration-with-bambu-connect/)はLAN Only / Developer Modeを説明。ファームウェアによって第三者コマンドが拒否され得る。実際のA1 miniで許可方式・パス・ACKを確認するまで互換性は未検証。
