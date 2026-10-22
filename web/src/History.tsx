@@ -1,8 +1,8 @@
-import { useEffect, useRef, useState } from 'react';
-import { Link } from '@tanstack/react-router';
+import { useEffect, useState } from 'react';
+import { getRouteApi, Link, useNavigate } from '@tanstack/react-router';
+import { useInfiniteQuery } from '@tanstack/react-query';
 import { errorMessage } from './api.js';
-import { getHistoryPage } from './preview-queries.js';
-import type { HistoryItem } from './api.js';
+import { historyOptions, validateHistorySearch } from './query-options.js';
 
 function duration(seconds: number | null) {
   if (seconds === null) return '—';
@@ -11,55 +11,17 @@ function duration(seconds: number | null) {
 }
 
 export function History() {
-  const [searchText, setSearchText] = useState('');
-  const [query, setQuery] = useState('');
-  const [items, setItems] = useState<HistoryItem[]>([]);
-  const [cursor, setCursor] = useState<string | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState('');
-  const request = useRef<AbortController | null>(null);
+  const { q = '' } = getRouteApi('/history').useSearch();
+  const navigate = useNavigate();
+  const [searchText, setSearchText] = useState(q);
+  const [searchError, setSearchError] = useState('');
+  const result = useInfiniteQuery(historyOptions(q));
+  const items = result.data?.pages.flatMap((page) => page.items) ?? [];
+  const loading = result.isFetching;
+  const error = searchError || (result.error ? errorMessage(result.error) : '');
   useEffect(() => {
     document.title = 'pi_wedge — スライス履歴';
   }, []);
-  useEffect(() => {
-    const abort = new AbortController();
-    request.current = abort;
-    setLoading(true);
-    setError('');
-    setItems([]);
-    setCursor(null);
-    void (async () => {
-      try {
-        const page = await getHistoryPage(query, null, abort.signal);
-        abort.signal.throwIfAborted();
-        setItems(page.items);
-        setCursor(page.nextCursor);
-      } catch (cause) {
-        if (!abort.signal.aborted) setError(errorMessage(cause));
-      } finally {
-        if (!abort.signal.aborted) setLoading(false);
-      }
-    })();
-    return () => request.current?.abort();
-  }, [query]);
-  async function more() {
-    if (!cursor || loading) return;
-    request.current?.abort();
-    const abort = new AbortController();
-    request.current = abort;
-    setLoading(true);
-    setError('');
-    try {
-      const page = await getHistoryPage(query, cursor, abort.signal);
-      abort.signal.throwIfAborted();
-      setItems((current) => [...current, ...page.items]);
-      setCursor(page.nextCursor);
-    } catch (cause) {
-      if (!abort.signal.aborted) setError(errorMessage(cause));
-    } finally {
-      if (!abort.signal.aborted) setLoading(false);
-    }
-  }
   return (
     <div className="app-shell">
       <header className="app-header">
@@ -74,7 +36,13 @@ export function History() {
           className="history-search"
           onSubmit={(event) => {
             event.preventDefault();
-            if (!loading) setQuery(searchText.trim());
+            try {
+              const search = validateHistorySearch({ q: searchText });
+              setSearchError('');
+              void navigate({ to: '/history', search });
+            } catch (cause) {
+              setSearchError(errorMessage(cause));
+            }
           }}
         >
           <input
@@ -84,9 +52,7 @@ export function History() {
             maxLength={80}
             onChange={(event) => setSearchText(event.target.value)}
           />
-          <button type="submit" disabled={loading}>
-            検索
-          </button>
+          <button type="submit">検索</button>
         </form>
         {items.length > 0 && (
           <div className="history-list">
@@ -133,10 +99,15 @@ export function History() {
           </p>
         )}
         {!loading && !error && items.length === 0 && (
-          <p>{query ? '見つかりません。' : 'スライスはまだありません。'}</p>
+          <p>{q ? '見つかりません。' : 'スライスはまだありません。'}</p>
         )}
-        {cursor && !loading && (
-          <button className="secondary history-more" onClick={() => void more()}>
+        {result.hasNextPage && !loading && (
+          <button
+            className="secondary history-more"
+            onClick={() => {
+              if (!result.isFetching) void result.fetchNextPage();
+            }}
+          >
             さらに表示
           </button>
         )}

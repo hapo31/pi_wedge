@@ -10,12 +10,13 @@ import {
 } from 'react';
 const Viewer = lazy(() => import('./Viewer.js').then((module) => ({ default: module.Viewer })));
 import { getRouteApi, Link, useParams } from '@tanstack/react-router';
+import { useQuery } from '@tanstack/react-query';
 import { ApiError, fetchPreview, errorMessage } from './api.js';
-import { getPreviewData, getPreviewText, getPrinterStatus } from './preview-queries.js';
+import { previewDataOptions, previewTextOptions, printerStatusOptions } from './query-options.js';
 import { usePreviewLayout } from './App.js';
-import type { Metadata, Operation } from './api.js';
+import type { Operation } from './api.js';
 import { AmsSettings } from './AmsSettings.js';
-import type { PrinterStatus, BrowserPrintSettings } from './api.js';
+import type { BrowserPrintSettings } from './api.js';
 import { PrintController } from './print-controller.js';
 import type { PrintState } from './print-controller.js';
 const INITIAL: PrintState = { busy: false, operation: null, message: '', key: null };
@@ -40,24 +41,31 @@ export function PreviewScreen() {
     return () => observer.disconnect();
   }, [reserveSidebarHeight]);
   const plateQuery = previewId ? `?previewId=${previewId}` : '';
-  const [plates, setPlates] = useState<{ id: string; plate: number }[]>([]);
-  const [selectedPlate, setSelectedPlate] = useState(1);
-  const [plateId, setPlateId] = useState(uuid);
-  const validUuid = [uuid, ...(previewId ? [previewId] : [])].every((id) =>
-    /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(id),
-  );
-  const [file, setFile] = useState<Metadata | null>(null),
-    [displayName, setDisplayName] = useState(''),
-    [text, setText] = useState(''),
-    [error, setError] = useState(''),
-    [loading, setLoading] = useState(validUuid),
-    [ready, setReady] = useState(false),
-    [printerEnabled, setPrinterEnabled] = useState(false),
+  const metadata = useQuery(previewDataOptions(uuid, previewId));
+  const data = metadata.data;
+  const file = data?.file;
+  const displayName = data?.displayName ?? '';
+  const plates = data?.plates ?? [];
+  const selectedPlate = data?.plate ?? 1;
+  const plateId = data?.plateId ?? uuid;
+  const printerEnabled = data?.printerEnabled === true;
+  const textQuery = useQuery({
+    ...previewTextOptions(uuid, previewId),
+    enabled: metadata.isSuccess,
+  });
+  const statusQuery = useQuery({
+    ...printerStatusOptions(uuid, previewId),
+    enabled: metadata.isSuccess && printerEnabled,
+  });
+  const text = textQuery.data ?? '';
+  const loading = textQuery.isPending && !textQuery.isError;
+  const printerStatus = statusQuery.isError ? null : (statusQuery.data ?? null);
+  const statusLoading = statusQuery.isFetching;
+  const statusError = statusQuery.error ? errorMessage(statusQuery.error) : '';
+  const [downloadError, setDownloadError] = useState('');
+  const error = downloadError || (textQuery.error ? errorMessage(textQuery.error) : '');
+  const [ready, setReady] = useState(false),
     [printState, setPrintState] = useState<PrintState>(INITIAL),
-    [printerStatus, setPrinterStatus] = useState<PrinterStatus | null>(null),
-    [statusLoading, setStatusLoading] = useState(false),
-    [statusError, setStatusError] = useState(''),
-    [refresh, setRefresh] = useState(0),
     [selectedSlot, setSelectedSlot] = useState<number | null>(null);
   const onViewerReady = useCallback((value: boolean) => setReady(value), []);
   const controller = useMemo(
@@ -86,69 +94,16 @@ export function PreviewScreen() {
     [uuid, plateQuery],
   );
   useEffect(() => {
-    if (!validUuid) return;
-    const abort = new AbortController();
-    setLoading(true);
-    setError('');
-    setText('');
-    setFile(null);
-    setReady(false);
-    setPrinterEnabled(false);
-
-    void (async () => {
-      try {
-        const data = await getPreviewData(uuid, previewId, abort.signal);
-        abort.signal.throwIfAborted();
-        // Commit only active results. The parent keeps the previous list while
-        // this child loads and when a selected plate cannot be fetched.
-        updatePreview(data);
-        setPlates(data.plates ?? [{ id: previewId, plate: 1 }]);
-        setSelectedPlate(data.plate ?? 1);
-        setPlateId(data.plateId ?? uuid);
-        const saved = controller.restore(previewId || uuid);
-        setSelectedSlot(saved.useAms ? (saved.amsMapping?.[0] ?? null) : null);
-        const metadata = data.file;
-        setFile(metadata);
-        setDisplayName(data.displayName);
-        if (metadata.state !== 'ready' || !['gcode', 'gcode.3mf'].includes(metadata.format))
-          throw new Error('このファイルはプレビューできません。');
-        setPrinterEnabled(data.printerEnabled === true);
-        const gcode = await getPreviewText(uuid, previewId, abort.signal);
-        abort.signal.throwIfAborted();
-        setText(gcode);
-      } catch (e) {
-        if (!abort.signal.aborted) setError(errorMessage(e));
-      } finally {
-        if (!abort.signal.aborted) setLoading(false);
-      }
-    })();
-    return () => abort.abort();
-  }, [uuid, validUuid, controller, previewId, updatePreview]);
+    if (data) updatePreview(data);
+  }, [data, updatePreview]);
+  useEffect(() => {
+    const saved = controller.restore(previewId || uuid);
+    setSelectedSlot(saved.useAms ? (saved.amsMapping?.[0] ?? null) : null);
+  }, [controller, previewId, uuid]);
   useEffect(() => {
     setPrintBusy(printState.busy);
     return () => setPrintBusy(false);
   }, [printState.busy, setPrintBusy]);
-  useEffect(() => {
-    if (!file || !printerEnabled) return;
-    const abort = new AbortController();
-    setStatusLoading(true);
-    setStatusError('');
-    void (async () => {
-      try {
-        const snapshot = await getPrinterStatus(uuid, abort.signal);
-        abort.signal.throwIfAborted();
-        setPrinterStatus(snapshot);
-      } catch (e) {
-        if (!abort.signal.aborted) {
-          setPrinterStatus(null);
-          setStatusError(errorMessage(e));
-        }
-      } finally {
-        if (!abort.signal.aborted) setStatusLoading(false);
-      }
-    })();
-    return () => abort.abort();
-  }, [file, printerEnabled, uuid, refresh]);
   const settingsLocked =
     printState.busy ||
     ['accepted', 'pending', 'unknown'].includes(printState.operation?.state ?? '') ||
@@ -175,7 +130,7 @@ export function PreviewScreen() {
       link.click();
       setTimeout(() => URL.revokeObjectURL(url), 1000);
     } catch (e) {
-      setError(errorMessage(e));
+      setDownloadError(errorMessage(e));
     }
   }
   return (
@@ -195,11 +150,7 @@ export function PreviewScreen() {
           <div className="empty-view">
             <span className="empty-icon">◈</span>
             <h1>プレビュー</h1>
-            {!validUuid ? (
-              <p className="error" role="alert">
-                プレビューのURLを確認してください。
-              </p>
-            ) : loading ? (
+            {loading ? (
               <p role="status">読み込み中…</p>
             ) : (
               <p className="error" role="alert">
@@ -267,7 +218,7 @@ export function PreviewScreen() {
               selected={selectedSlot}
               disabled={settingsLocked}
               onSelect={setSelectedSlot}
-              onRefresh={() => setRefresh((n) => n + 1)}
+              onRefresh={() => void statusQuery.refetch()}
             />
           )}
           <button

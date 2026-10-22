@@ -1,5 +1,24 @@
 import { useEffect, useState } from 'react';
-import { getThumbnail } from './preview-queries.js';
+import { useQuery } from '@tanstack/react-query';
+import { thumbnailOptions } from './query-options.js';
+
+function Thumbnail({ uuid, id, plate }: { uuid: string; id: string; plate: number }) {
+  const { data: blob } = useQuery(thumbnailOptions(uuid, id));
+  const [url, setUrl] = useState('');
+  useEffect(() => {
+    if (!blob) return;
+    const next = URL.createObjectURL(blob);
+    setUrl(next);
+    return () => URL.revokeObjectURL(next);
+  }, [blob]);
+  return url ? (
+    <img src={url} alt="" />
+  ) : (
+    <span className="thumbnail-placeholder" aria-hidden="true">
+      {plate}
+    </span>
+  );
+}
 export function PlateThumbnails({
   uuid,
   plates,
@@ -13,31 +32,6 @@ export function PlateThumbnails({
   disabled: boolean;
   onSelect: (id: string) => void;
 }) {
-  const [images, setImages] = useState<Record<string, string>>({});
-  const key = plates.map((p) => p.id).join(',');
-  useEffect(() => {
-    const abort = new AbortController();
-    const urls: string[] = [];
-    setImages({});
-    void (async () => {
-      // Load one at a time to stay within the server's preview memory budget.
-      for (const plate of key.split(',')) {
-        try {
-          const blob = await getThumbnail(uuid, plate, abort.signal);
-          abort.signal.throwIfAborted();
-          const url = URL.createObjectURL(blob);
-          urls.push(url);
-          setImages((previous) => ({ ...previous, [plate]: url }));
-        } catch {
-          if (abort.signal.aborted) return;
-        }
-      }
-    })();
-    return () => {
-      abort.abort();
-      for (const url of urls) URL.revokeObjectURL(url);
-    };
-  }, [uuid, key]);
   return (
     <nav className="plate-thumbnails" aria-label="プレート">
       {plates.map(({ id, plate }) => (
@@ -48,13 +42,7 @@ export function PlateThumbnails({
           disabled={disabled}
           onClick={() => onSelect(id)}
         >
-          {images[id] ? (
-            <img src={images[id]} alt="" />
-          ) : (
-            <span className="thumbnail-placeholder" aria-hidden="true">
-              {plate}
-            </span>
-          )}
+          <Thumbnail uuid={uuid} id={id} plate={plate} />
           <span>プレート {plate}</span>
         </button>
       ))}

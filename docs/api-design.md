@@ -95,7 +95,7 @@ curl -H "Authorization: Bearer $TOKEN" "$PI_WEDGE_URL/api/printer/operations/$OP
 ```
 
 ブラウザは `/preview/$FILE_ID` を開くだけで表示する。AIがこのURLをユーザーへ渡す。JSONレスポンスのUUIDは手元に保存し、ジョブがsucceededになるまでpollする。unknownは結果を確認するまで新しいキーで再試行しない。
-過去のスライスはLAN内のブラウザで `/history` を開く。一覧からプレビューへ移動できる。
+過去のスライスはLAN内のブラウザで `/history` を開く。一覧からプレビューへ移動できる。ブラウザの検索条件は`/history?q=...`へ保存し、戻る/進むでも復元する。追加ページのcursorは画面内のQueryが管理し、URLには含めない。RESTの`/history/data?q=...&cursor=...`と公開範囲は変更しない。
 
 ## AMS供給設定
 

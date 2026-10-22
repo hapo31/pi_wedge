@@ -257,3 +257,33 @@ AMS供給設定は今回の単色スライスで使う供給元/スロットの�
 - 稼働環境では読取だけを実行し、ブラウザからの印刷・停止・転送POSTは遮断して0件を確認した。プリンター接続成功や実機の印刷結果を検証したものではない。
 
 反映後の結果は`/tmp/pi-wedge-router-deploy/live-http-result.json`、`live-browser-result.json`、画像は同ディレクトリの`live-desktop.png`と`live-mobile.png`。バックアップはディレクトリ0700、SQLite0600でGit管理外に保存した。
+
+## TanStack Queryとloader移行（2026-10-22）
+
+実装: `@tanstack/react-query` 5.104.5を固定して追加。メタデータ・G-code・AMS・履歴・サムネイルの通信開始を4か所のeffectからQueryへ移した。子loaderはQueryObserverの購読を取得し、成功後に画面へ渡す。ルート中止時は購読を解除し、同じqueryを必要とする他の購読がなければ通信と503再試行待機を中断する。履歴は初期ページを含めて`useInfiniteQuery`へ統合した。取得はZodで検証したURL検索語で分離し、追加ページ失敗時は既存ページを保持する。
+
+- 隔離コピー`/tmp/pi-wedge-query-check.KJpe8v`で`npm run check`が成功。型・Lint・Format、Vitest16ファイル102テスト、サーバー/UIビルドを確認。通常サンドボックスでは既存の外部コマンドテスト2件がstdout空で失敗したため、子プロセス権限のある環境で全チェックを実行した。
+- Query関連の追加8テストで、ルート入力検証、loaderと画面間の二重取得防止、再進入でのメタデータ更新、共有購読を残した中断、最後の購読の中断と遅い応答の排除、503待機の中断、G-codeの非購読後のキャッシュ破棄とストリーム中断、履歴ページの分離、画像取得キューの中断・失敗後の継続を確認した。
+- 隔離コピーのAPIサーバーを`127.0.0.1:3301`、一時SQLite・ローカルストレージ・`PRINTER_ENABLED=false`で起動し、`npm run test:e2e`の実Chromium17件が成功。新規4件で本文413後の統計とダウンロード表示、メタデータの取得1回、画像の同時数1と失敗後の継続、AMS更新時の同じcanvasと取得回数、更新失敗後の旧供給情報の無効化、メタデータ失敗後の一覧保持と別枚への復帰、履歴の追加失敗・追加成功・検索切替・戻るを確認した。
+- 既存13件でも、大規模G-code、印刷確認とunknown/acceptedの保存・復元、503 `preview_busy`、連続切替と遅延応答、一覧DOM・画像URL・横スクロール、通常スクロールバーと長いAMS欄、390px幅、SPAと旧URLの302を引き続き確認した。
+- ブラウザは既存`/tmp/pi-wedge-router-browsers`、共有ライブラリは`/tmp/pi-wedge-copy-browser-deps/extracted/usr/lib/aarch64-linux-gnu`を指定した。結果・画像は隔離コピーの`test-results`へ保存。API応答・印刷操作はPlaywrightでモックしており、稼働サービス・実保存データ・実機の転送/印刷を検証したものではない。
+
+上記は反映前の隔離検証である。G-codeの`gcTime: 0`は非購読後のキャッシュ破棄を確認したもので、実機ブラウザの最大ヒープ量やJavaScript GCの即時実行を保証するものではない。
+
+## Query移行の稼働サービス反映（2026-10-22）
+
+ユーザーから反映の承認を受け、検証済みUIを`pi-wedge.service`へ反映した。現在のpackage・src・web・tests・e2eの65ファイルが検証済みコピーと一致し、稼働サーバーのビルドも検証済みコピーと完全一致していたため、変更する成果物は`dist/web`に限定した。
+
+- 更新直前にqueued/runningジョブとpending/unknown印刷・停止操作が0件であることを確認。SQLiteの整合したバックアップと旧distを`/tmp/pi-wedge-query-deploy-20261022`へ保存した。ディレクトリ0700、SQLiteとtarは0600でGit管理外。S3の成果物やDBレコードを更新する処理は実行していない。
+- 新しいハッシュ付き資産を先に配置し、最後にindex.htmlを置換。旧ハッシュの資産も保持した。既存ユーザーサービスを再起動し、最終PID `2757966`でactive/runningを確認した。補助照合スクリプトのSQLite行オブジェクトの型差を修正した際、UI更新前にも一度再起動したが、アプリデータの差分はなかった。
+- `/health`、認証付き`/api/ready`、`/history`、`/history/data`は200。配信中の新UI `index-fflT2sF7.js`を含む7ファイルすべてのSHA-256が検証済み成果物と一致した。
+- SQLiteは`quick_check: ok`。アプリデータ`records`の全229件の件数・内容ハッシュが反映前後で一致した。内訳はreadyファイル144件、ジョブsucceeded73件/failed1件、印刷操作accepted3件/failed2件、集合2件、プレビュー4件。サービス所有者PIDは再起動に合わせて通常どおり更新された。
+- `http://pi5s.local:3000`を実Chromiumで開き、実保存データで履歴24→48件、検索結果1件、URLの検索語と戻る操作、旧結果UUIDから正規URLへの302を確認。3枚のサムネイル、40→890層の切替と戻る、一覧DOM・画像URL・横スクロールの保持、切替時の追加サムネイル要求0件を確認した。
+- 初回表示のメタデータとG-codeは各1回取得し、戻る時のメタデータは再取得して計2回になった。Viewerの完了待ちは表示UUIDとloading消失も条件とし、旧画面のsliderを計測しないようにした。デスクトップ・390px幅の画像を保存し、横はみ出しなし、JavaScriptエラー0件を確認した。
+- 稼働ブラウザではGET/HEAD以外を遮断し、書込要求の発生は0件だった。転送・印刷・停止は実行していない。プリンターとの通信成功や実造形の検証結果ではない。
+
+結果は`/tmp/pi-wedge-query-deploy-20261022/live-http-result.json`、`live-browser-result.json`、`before.json`、`after.json`。画像は同ディレクトリの`live-desktop.png`と`live-mobile.png`。バックアップと反映資産のハッシュ一覧も同じディレクトリへ保存した。
+
+## Query移行のコミット範囲の再検証（2026-10-22）
+
+別作業の3MF形状修正とクラウド印刷調査をコミットに含めず、共有文書も今回の変更だけをステージした。ステージ内容のみを`/tmp/pi-wedge-query-commit-check.1lmSmC`へ展開し、`npm run check`で型・Lint・Format・Vitest98テスト・サーバー/UIビルドが成功した。先の102テストには別作業の3MF回帰テスト4件も含まれていた。コミット範囲で生成したビルド全73ファイルは稼働distとハッシュ一致し、E2E17件と稼働ブラウザ確認を終えたUIと同じ成果物になった。既存の別作業の未コミット変更は作業ツリーに保持した。
