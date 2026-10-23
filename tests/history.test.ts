@@ -136,16 +136,28 @@ describe('LAN slice history', () => {
       result.createdAt = new Date(Date.UTC(2026, 9, 19, 0, 0, index)).toISOString();
       c.repository.save('file', result);
       resultIds.push(resultId);
+      const appended = await c.jobs.createWithParent(
+        model.id,
+        SliceOptionsSchema.parse({}),
+        `追加 ${index}`,
+        resultId,
+      );
+      await c.jobs.idle();
+      const child = c.repository.get('file', c.jobs.get(appended.id).resultFileId!)!;
+      child.createdAt = new Date(Date.UTC(2026, 9, 19, 0, 1, index)).toISOString();
+      c.repository.save('file', child);
     }
     const first = await (await c.app.request('/history/data')).json();
     expect(first.items).toHaveLength(24);
     expect(first.items[0].id).toBe(resultIds[25]);
+    expect(first.items[0]).toMatchObject({ previewId: resultIds[25], plateCount: 2 });
     expect(first.nextCursor).toBe(first.items[23].id);
     const second = await (await c.app.request(`/history/data?cursor=${first.nextCursor}`)).json();
     expect(second.items.map((item: { id: string }) => item.id)).toEqual(
       resultIds.slice(0, 2).reverse(),
     );
     expect(second.nextCursor).toBeNull();
+    expect((await (await c.app.request('/history/data?q=追加')).json()).items).toEqual([]);
     expect((await (await c.app.request('/history/data?q=%E7%89%88')).json()).items).toHaveLength(
       24,
     );
@@ -160,6 +172,9 @@ describe('LAN slice history', () => {
     const spec = await (await c.app.request('/openapi.json')).json();
     expect(spec.paths['/history/data'].get.security).toEqual([]);
     expect(spec.paths['/history/data'].get.operationId).toBe('listBrowserSliceHistory');
+    expect(spec.paths['/history/data'].get.description).toContain(
+      'appended results are excluded before search and pagination',
+    );
     expect(spec.paths['/history'].get.security).toEqual([]);
     const bodies = spec.paths['/api/slices'].post.requestBody.content;
     expect(JSON.stringify(bodies['application/json'].schema)).toContain('name');
