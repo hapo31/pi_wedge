@@ -3,8 +3,8 @@
 ```mermaid
 flowchart LR
   C[LAN client / AI] --> H[Hono + OpenAPI]
-  A[MCP client] --> X[/mcp Streamable HTTP/]
-  X --> H
+  A[MCP client] --> X[/mcp Streamable HTTP: workflow guidance/]
+  H --> X
   U[React preview] --> H
   H --> F[File service]
   H --> Q[Persisted slice queue]
@@ -12,7 +12,7 @@ flowchart LR
   F --> D[(SQLite metadata)]
   F --> S[ObjectStorage interface]
   S --> W[SeaweedFS mini / S3]
-  Q --> A[Slicer interface / Orca adapter]
+  Q --> O[Slicer interface / Orca adapter]
   Q --> M[ModelConverter / FreeCAD]
   Q --> F
   P --> F

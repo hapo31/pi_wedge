@@ -6,7 +6,7 @@ React + TypeScript、Three.jsベースの[gcode-preview](https://github.com/xyz-
 
 `/preview/{uuid}`: 大きな3D viewport、右側ファイル名/UUID/推定時間/材料/接続状態、下部レイヤースライダー。180×180×180mm build volume、回転/ズーム/pan、単一レイヤー/積層表示、travel toggle。印刷は別の目立つボタン→ネイティブ確認ダイアログ→API、実行中disable、恒久冪等キー使用。unknownは成功と表示しない。
 
-AIから受け取った `/preview/{uuid}` を開くだけで、指定した表示名（なければ元モデル名）・統計・3Dツールパスを自動表示する。トークン入力、APIリンク、UUIDの目立つ表示を省き、スマホで確認して印刷開始する用途に絞る。UIにAPI_TOKENを埋め込まず、データは専用の `/preview/{uuid}/data`・`gcode`・`download` から取得。元モデル本体は公開しない。`/history` と `/history/data` は信頼するLANへreadyスライスの名前・日時・形式・推定時間・フィラメント量・結果UUIDだけをページ分割して公開する。403/404/422/413を日本語で表示。
+AIから受け取った `/preview/{uuid}` を開くだけで、指定した表示名（なければ元モデル名）・統計・3Dツールパスを自動表示する。トークン入力、APIリンク、UUIDの目立つ表示を省き、スマホで確認して印刷開始する用途に絞る。UIにAPI_TOKENを埋め込まず、データは専用の `/preview/{uuid}/data`・`gcode`・`download` から取得。元モデル本体は公開しない。`/history` と `/history/data` は信頼するLANへreadyスライスの名前・日時・形式・統計・結果UUIDと、割当済みのプレートUUID・プレビューUUID・枚数をページ分割して公開する。詳細は[複数プレートとUUID](#複数プレートとuuid)を参照。403/404/422/413を日本語で表示。
 
 「印刷」は確認後にAMS供給設定JSON（外部スプールは空本文も対応）をPOSTで `/preview/{uuid}/print` へ送信。同一OriginとIdempotency-Keyをサーバーで検証し、認証済みAI APIと同じPrinterServiceを使用する。Originがない/一致しない要求は403、CORSは許可しない。これは信頼するLANでの運用を前提とする。
 
