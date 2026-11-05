@@ -106,7 +106,7 @@ export function PreviewScreen() {
   }, [printState.busy, setPrintBusy]);
   const settingsLocked =
     printState.busy ||
-    ['accepted', 'pending', 'unknown'].includes(printState.operation?.state ?? '') ||
+    ['pending', 'unknown'].includes(printState.operation?.state ?? '') ||
     Boolean(printState.key && !printState.operation);
   const selected = printerStatus?.slots.find((s) => s.slot === selectedSlot);
   const validSupply =
@@ -116,7 +116,7 @@ export function PreviewScreen() {
       (!selected.material || selected.material.toUpperCase() === 'PLA'));
   const settings: BrowserPrintSettings =
     selectedSlot === null ? { useAms: false } : { useAms: true, amsMapping: [selectedSlot] };
-  const confirmation = `印刷しますか？\n${displayName}${plates.length > 1 ? `\nプレート ${selectedPlate}` : ''}\n供給元: ${selectedSlot === null ? '外部スプール' : `AMS スロット${selectedSlot + 1} · ${selected?.material ?? '材料未取得'} · ${selected?.color ?? '色未取得'}`}\nスライス設定: Generic PLA\nベッドレベリング: 有効\nベッドが空で、材料とプレートが合っていることを確認してください。`;
+  const confirmation = `${printState.operation?.state === 'accepted' ? '前回の造形物と印刷状態を確認してください。\n' : ''}印刷しますか？\n${displayName}${plates.length > 1 ? `\nプレート ${selectedPlate}` : ''}\n供給元: ${selectedSlot === null ? '外部スプール' : `AMS スロット${selectedSlot + 1} · ${selected?.material ?? '材料未取得'} · ${selected?.color ?? '色未取得'}`}\nスライス設定: Generic PLA\nベッドレベリング: 有効\nベッドが空で、材料とプレートが合っていることを確認してください。`;
   async function download() {
     try {
       const response = await fetchPreview(`/preview/${uuid}/download`);
@@ -232,7 +232,6 @@ export function PreviewScreen() {
                   (!printState.operation || printState.operation.state === 'pending')
                 )) ||
               printState.busy ||
-              printState.operation?.state === 'accepted' ||
               printState.operation?.state === 'unknown'
             }
             onClick={() => void controller.start(previewId || uuid, settings, confirmation)}
@@ -240,7 +239,7 @@ export function PreviewScreen() {
             {printState.busy
               ? '送信中…'
               : printState.operation?.state === 'accepted'
-                ? '受付済み'
+                ? 'もう一度印刷'
                 : printState.operation?.state === 'unknown'
                   ? '結果不明'
                   : printState.operation?.state === 'failed'

@@ -81,8 +81,7 @@ export class PrintController {
     settings: BrowserPrintSettings = { useAms: false },
     message?: string,
   ) {
-    if (this.state.busy || ['accepted', 'unknown'].includes(this.state.operation?.state ?? ''))
-      return;
+    if (this.state.busy || this.state.operation?.state === 'unknown') return;
     const unresolved =
       this.state.key && (!this.state.operation || this.state.operation.state === 'pending');
     const request = unresolved

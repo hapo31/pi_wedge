@@ -6,7 +6,7 @@ import {
   DeleteObjectCommand,
   HeadBucketCommand,
 } from '@aws-sdk/client-s3';
-import { mkdir, rename, rm, stat } from 'node:fs/promises';
+import { mkdir, readdir, rename, rm, stat } from 'node:fs/promises';
 import { createReadStream, createWriteStream } from 'node:fs';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
@@ -17,16 +17,18 @@ import type { Config } from '../config.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError } from '../domain/errors.js';
 export class LocalStorage implements ObjectStorage {
+  private active = new Set<string>();
   constructor(private dir: string) {}
   private path(id: string) {
     return join(this.dir, Uuid.parse(id));
   }
   async put(id: string, body: Readable, size: number) {
-    await mkdir(this.dir, { recursive: true });
     const target = this.path(id),
       temp = `${target}.${randomUUID()}.tmp`;
+    this.active.add(temp);
     let bytes = 0;
     try {
+      await mkdir(this.dir, { recursive: true });
       await pipeline(
         body,
         new Transform({
@@ -45,7 +47,21 @@ export class LocalStorage implements ObjectStorage {
       if (bytes !== size) throw new AppError('storage_size_mismatch', 'Object size mismatch', 503);
       await rename(temp, target);
     } finally {
-      await rm(temp, { force: true });
+      try {
+        await rm(temp, { force: true });
+      } finally {
+        this.active.delete(temp);
+      }
+    }
+  }
+  async recover() {
+    await mkdir(this.dir, { recursive: true });
+    const uuid = '[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[89ab][0-9a-f]{3}-[0-9a-f]{12}';
+    const temporary = new RegExp(`^${uuid}\\.${uuid}\\.tmp$`, 'i');
+    for (const entry of await readdir(this.dir, { withFileTypes: true })) {
+      const path = join(this.dir, entry.name);
+      if (entry.isFile() && temporary.test(entry.name) && !this.active.has(path))
+        await rm(path, { force: true });
     }
   }
   async get(id: string) {

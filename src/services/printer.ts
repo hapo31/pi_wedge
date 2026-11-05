@@ -141,52 +141,55 @@ export class PrinterService {
       createdAt: new Date().toISOString(),
       error: null,
     };
-    this.files.repository.insert('operation', operation);
-    let dispatched = false;
     try {
-      if (options.useAms) {
-        const status = await this.status(true),
-          slot = status.slots.find((s) => s.slot === options.amsMapping?.[0]);
-        if (status.amsConnected !== true || slot?.present !== true)
-          throw new AppError(
-            'ams_slot_unavailable',
-            'Selected AMS slot is empty or its state is unknown',
-            409,
-          );
-        if (slot.material && slot.material.toUpperCase() !== 'PLA')
-          throw new AppError(
-            'ams_material_mismatch',
-            'Selected AMS material does not match the Generic PLA slice',
-            409,
-          );
+      this.files.repository.insert('operation', operation);
+      let dispatched = false;
+      try {
+        if (options.useAms) {
+          const status = await this.status(true),
+            slot = status.slots.find((s) => s.slot === options.amsMapping?.[0]);
+          if (status.amsConnected !== true || slot?.present !== true)
+            throw new AppError(
+              'ams_slot_unavailable',
+              'Selected AMS slot is empty or its state is unknown',
+              409,
+            );
+          if (slot.material && slot.material.toUpperCase() !== 'PLA')
+            throw new AppError(
+              'ams_material_mismatch',
+              'Selected AMS material does not match the Generic PLA slice',
+              409,
+            );
+        }
+        await this.withFile(fileId, async (path) => {
+          if (!(await listPlates(path)).includes(options.plate))
+            throw new AppError('plate_not_found', 'Plate does not exist', 404);
+          const { remotePath } = await this.printer.upload(file, path);
+          dispatched = true;
+          await this.printer.startPrint(remotePath, options, key);
+        });
+        operation.state = 'accepted';
+      } catch (error) {
+        operation.state =
+          (error instanceof AppError && error.code === 'printer_outcome_unknown') ||
+          (dispatched && !(error instanceof AppError))
+            ? 'unknown'
+            : 'failed';
+        operation.error =
+          operation.state === 'unknown'
+            ? {
+                code: 'printer_outcome_unknown',
+                message: 'Print command outcome is unknown. Check the printer before retrying.',
+              }
+            : safeError(error);
+        logError('printer', key, error);
+      } finally {
+        this.files.repository.save('operation', operation);
       }
-      await this.withFile(fileId, async (path) => {
-        if (!(await listPlates(path)).includes(options.plate))
-          throw new AppError('plate_not_found', 'Plate does not exist', 404);
-        const { remotePath } = await this.printer.upload(file, path);
-        dispatched = true;
-        await this.printer.startPrint(remotePath, options, key);
-      });
-      operation.state = 'accepted';
-    } catch (error) {
-      operation.state =
-        (error instanceof AppError && error.code === 'printer_outcome_unknown') ||
-        (dispatched && !(error instanceof AppError))
-          ? 'unknown'
-          : 'failed';
-      operation.error =
-        operation.state === 'unknown'
-          ? {
-              code: 'printer_outcome_unknown',
-              message: 'Print command outcome is unknown. Check the printer before retrying.',
-            }
-          : safeError(error);
-      logError('printer', key, error);
+      return operation;
     } finally {
-      this.files.repository.save('operation', operation);
       this.busy = false;
     }
-    return operation;
   }
   async stopPrint(key: string): Promise<StopPrintOperation> {
     Uuid.parse(key);
@@ -238,8 +241,11 @@ export class PrinterService {
           : safeError(error);
       logError('printer_stop', key, error);
     } finally {
-      this.saveOperation(operation);
-      this.busy = false;
+      try {
+        this.saveOperation(operation);
+      } finally {
+        this.busy = false;
+      }
     }
     return operation;
   }

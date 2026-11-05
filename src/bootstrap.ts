@@ -86,6 +86,7 @@ export async function bootstrap(config: Config) {
   try {
     if (runner instanceof DockerCommandRunner) await runner.recover();
     await storage.check();
+    if (storage instanceof LocalStorage) await storage.recover();
     await files.recover();
     await printer.recover();
     await preview.recover();
