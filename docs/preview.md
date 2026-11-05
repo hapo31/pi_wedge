@@ -20,11 +20,11 @@ AIから受け取った `/preview/{uuid}` を開くだけで、指定した表�
 
 実装は元テキストを走査してparserへ最大1,000行ずつ投入し、全行の配列を保持しない。描画用に不要なコメント・サムネイルを除き、解析/描画が8msの処理枠を使ったら次のフレームへyieldする。ライブラリのrenderLayerで移動/円弧を解釈し、1レイヤーの内部も最大1,000コマンドずつgeometryへ変換する。完了したレイヤーのコマンドを解放し、同色のmaterialを共有する。中断時は処理を停止し、geometry/materialを解放する。レイヤー変更は既存geometryの可視性変更だけで再解析/再生成しない。feature/速度による色分けは未実装、押出/移動の色とtravel切替を実装。
 
-旧250,000行/レイヤー20,000コマンド制限には、実測に基づく限界値の記録がなかった。コメントを含む総行数では描画負荷も決まらないため、全体表示の要望に合わせて撤廃した。容量・1行長・ZIPの制限は継続し、サーバーのG-code検証も10,000行ごとにevent loopへyieldする。
+容量・1行長・ZIP構造を検証し、総行数とレイヤー内のコマンド数には上限を設けない。サーバーのG-code検証は10,000行ごとにevent loopへyieldする。
 
 初期視点とviewportのサイズ変更時は、全レイヤーの境界からカメラの注視点と距離を求め、モデル全体が収まるようにする。単一レイヤーへの切替では視点を変更しない。
 
-Orca/Prusa系のCHANGE_LAYER/LAYER_CHANGEがある場合、開始前のパージ押出をプレビュー入力から除去し、起動時の移動/押出モードを保持する。実成果物の100レイヤー20mm cubeで層表示を検証。コメントのない通常G-codeはライブラリのZ/押出による層推定を利用する。
+Orca/Prusa系のCHANGE_LAYER/LAYER_CHANGEがある場合、開始前のパージ押出をプレビュー入力から除去し、起動時の移動/押出モードを保持する。コメントのない通常G-codeはライブラリのZ/押出による層推定を利用する。
 
 印刷ボタン上にAMS Lite接続状態と各スロットの材料・色・装填状態・使用中の供給元を表示する。更新ボタンで状態を読み直す。外部スプール/AMSとスロットを今回の印刷に選択できる。空・状態不明・既知のPLA以外のスロットは選べない。読み取り失敗は接続済みと表示せず、選択済みAMSでの新規開始を無効にする。送信中・受付済み・結果不明・応答不達時は設定を固定し、キーと設定をlocalStorageへ保持する。
 
@@ -46,7 +46,7 @@ TanStack Routerのコード定義を`web/src/router.tsx`に置く。`/history`�
 
 ## loaderとTanStack Query
 
-`@tanstack/react-query` 5.104.5を使用し、取得を開始する4か所のeffectをqueryへ置換した。GETの通信処理は`web/src/preview-queries.ts`、キー・取得条件は`query-options.ts`、QueryClientとloaderの受渡しは`query-client.ts`に置く。
+`@tanstack/react-query` 5.104.5を使用し、データの取得をqueryで管理する。GETの通信処理は`web/src/preview-queries.ts`、キー・取得条件は`query-options.ts`、QueryClientとloaderの受渡しは`query-client.ts`に置く。
 
 | データ     | キー                                   | 取得・保持                                                                                                                                                                                           |
 | ---------- | -------------------------------------- | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
@@ -62,4 +62,4 @@ QueryClientはアプリで一つを共有する。loaderは取得中だけQueryO
 
 全queryは`retry: false`、フォーカス・再接続時の自動取得なし、`networkMode: 'always'`とする。既存のGET専用503 `preview_busy`再試行だけを維持し、Queryのsignalを通信・ストリーム・再試行待機へ渡す。全枚のG-code先読み、Query永続化、自動ポーリングは行わない。`gcTime: 0`はJavaScriptヒープの即時解放を保証しないため、Viewerの解析・WebGL資源の破棄も引き続き行う。
 
-ダウンロードはクリック時の処理、印刷POST・確認・永続冪等キーは`PrintController`の責務とする。DOM計測、Blob URL、印刷状態復元などのeffectは残す。検討の経緯は[Query併用案](query-migration-research.md)、実際の検証結果は[検証記録](verification.md)を参照。
+ダウンロードはクリック時の処理、印刷POST・確認・永続冪等キーは`PrintController`の責務とする。DOM計測、Blob URL、印刷状態復元などのeffectは残す。検討の経緯は[Query併用案 #9](https://github.com/hapo31/pi_wedge/issues/9)、実際の検証結果は[検証記録 #10](https://github.com/hapo31/pi_wedge/issues/10)を参照。
