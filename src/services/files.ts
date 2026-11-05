@@ -31,17 +31,59 @@ export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
       return 'stl';
     }
   }
-  const text = bytes.toString('ascii');
-  const vertices = [...text.matchAll(/\bvertex\s+([^\s]+)\s+([^\s]+)\s+([^\s]+)/g)];
-  const facets = (text.match(/\bendfacet\b/g) ?? []).length;
-  if (
-    !/^\s*solid\b/i.test(text) ||
-    !text.includes('endsolid') ||
-    !facets ||
-    vertices.length !== facets * 3 ||
-    facets > 1000000 ||
-    vertices.some((m) => m.slice(1).some((v) => !Number.isFinite(Number(v))))
-  )
+  // Scan bytes without constructing a string or an array of all matches.
+  const ascii = (i: number) => (bytes[i] ?? 0) & 0x7f;
+  const word = (i: number) => {
+    if (i < 0 || i >= bytes.length) return false;
+    const c = ascii(i);
+    return (c >= 65 && c <= 90) || (c >= 97 && c <= 122) || (c >= 48 && c <= 57) || c === 95;
+  };
+  const space = (i: number) => {
+    if (i >= bytes.length) return false;
+    const c = ascii(i);
+    return c === 32 || (c >= 9 && c <= 13);
+  };
+  const matches = (i: number, value: string) => {
+    if (i + value.length > bytes.length) return false;
+    for (let j = 0; j < value.length; j++) if (ascii(i + j) !== value.charCodeAt(j)) return false;
+    return true;
+  };
+  let vertices = 0,
+    facets = 0,
+    invalid = false,
+    endsolid = false,
+    first = 0;
+  while (space(first)) first++;
+  const solid =
+    bytes.toString('ascii', first, first + 5).toLowerCase() === 'solid' && !word(first + 5);
+  for (let i = 0; i < bytes.length; i++) {
+    if (matches(i, 'endsolid')) endsolid = true;
+    if (!word(i - 1) && matches(i, 'endfacet') && !word(i + 8)) {
+      if (++facets > 1000000) invalid = true;
+      i += 7;
+    } else if (!word(i - 1) && matches(i, 'vertex') && space(i + 6)) {
+      let pos = i + 6;
+      for (let axis = 0; axis < 3; axis++) {
+        while (space(pos)) pos++;
+        const start = pos;
+        while (pos < bytes.length && !space(pos)) pos++;
+        // A coordinate this long is not a useful numeric value for a model.
+        if (
+          pos === start ||
+          pos - start > 1024 ||
+          !Number.isFinite(Number(bytes.toString('ascii', start, pos)))
+        ) {
+          invalid = true;
+          break;
+        }
+      }
+      if (invalid) break;
+      vertices++;
+      i = pos - 1;
+    }
+    if (invalid) break;
+  }
+  if (!solid || !endsolid || !facets || vertices !== facets * 3 || invalid)
     throw new AppError('invalid_file', 'Invalid ASCII or binary STL', 400);
   return 'stl';
 }

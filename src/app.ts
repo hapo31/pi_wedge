@@ -176,7 +176,30 @@ export function createApp(services?: Services & { ready?: boolean }) {
     }
     let raw: unknown;
     try {
-      raw = await c.req.json();
+      const reader = c.req.raw.body?.getReader();
+      const chunks: Uint8Array[] = [];
+      let size = 0;
+      if (reader) {
+        try {
+          for (;;) {
+            const { done, value } = await reader.read();
+            if (done) break;
+            if (!value.byteLength) continue;
+            size += value.byteLength;
+            if (size > 16384) {
+              void reader.cancel().catch(() => {});
+              return c.json(
+                { error: { code: 'too_large', message: 'Request size limit exceeded' } },
+                413,
+              );
+            }
+            chunks.push(value);
+          }
+        } finally {
+          reader.releaseLock();
+        }
+      }
+      raw = JSON.parse(Buffer.concat(chunks, size).toString('utf8'));
     } catch {
       return c.json(
         { error: { code: 'invalid_json', message: 'Request body must be valid JSON' } },

@@ -12,6 +12,8 @@
 
 クライアントによって設定画面やリモートHTTPサーバーの登録方法は異なります。サーバーURL、Streamable HTTP、Bearerヘッダーの3項目を指定してください。MCPクライアントとpi_wedgeサーバーの両方が同じLANから相互接続できる必要があります。
 
+MCPリクエスト本文の上限は16 KiBです。超過すると413を返します。
+
 ## モデルとの利用
 
 ツールは、モデル作成後にどのAPIを使うか、スライス完了後に利用者とどのURLで形状を確認するかを返します。AI側は `/docs` または `/openapi.json` でAPI仕様を読み、認証済みHTTP APIでアップロードとスライスを行います。ジョブが `succeeded` になったら、`resultFileId` を使った `http://raspberrypi.local:3000/preview/{resultFileId}` を利用者に渡します。利用者はブラウザで3D表示を確認できます。

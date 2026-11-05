@@ -33,9 +33,11 @@ OpenAPI 3.1 `/openapi.json` が機械可読の正本。Swagger `/docs` はロー
 
 `POST /api/slices` の任意の `name` はJSON・multipartの両方で受け付ける。前後空白を除いた1～80文字で、制御文字は拒否する。ジョブと完成した成果物に保存し、履歴・プレビューに表示する。省略時や既存データは元モデルのファイル名を表示する。名前の指定は印刷・スライス設定を変更しない。
 
+STLは三角形100万個以下とし、座標は有限値を要求する。ASCII STLの各座標トークンは最大1024バイト。不正な入力は400を返す。
+
 `GET /api/files/{uuid}/gcode` と `GET /preview/{uuid}/gcode` は通常G-code、またはコンテナ内の選択した`Metadata/plate_N.gcode`全体を返す。総行数での拒否や途中切り捨てはない。展開後の容量が`MAX_PREVIEW_MB`（既定32MiB、設定範囲1〜32）を超えると413。1行のコメント64KiB・コマンド4KiBやZIP構造の違反は422。元の成果物のダウンロードにはプレビュー容量上限を適用しない。
 
-`POST /mcp` は Streamable HTTP のJSON-RPC入口で、Bearer認証が必要。`pi_wedge_workflow` ツールがサービスの用途、`/docs`・`/openapi.json`、完了したスライスを開く `/preview/{resultFileId}` を案内するだけで、モデルのアップロード・スライス・印刷は実行しない。接続手順とツールの想定利用は [MCPガイド](mcp.md) を参照。
+`POST /mcp` は Streamable HTTP のJSON-RPC入口で、Bearer認証が必要。本文の実バイト数は16 KiBまでで、超過時は413を返す。`pi_wedge_workflow` ツールがサービスの用途、`/docs`・`/openapi.json`、完了したスライスを開く `/preview/{resultFileId}` を案内するだけで、モデルのアップロード・スライス・印刷は実行しない。接続手順とツールの想定利用は [MCPガイド](mcp.md) を参照。
 
 主なエラー: 400 schema/invalid_file、401 unauthorized、403 forbidden_origin、404 file/job/operation不存在、409 not_ready/wrong_kind/queue_full/idempotency_conflict/printer_busy、413 too_large、415 unsupported_format、422 invalid_gcode/archive、502 printer_error、503 dependency_unavailable、504 printer_outcome_unknown。詳細は各OpenAPI応答に記述。
 
