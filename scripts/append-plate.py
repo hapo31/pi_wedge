@@ -10,6 +10,8 @@ import re
 import sys
 import zipfile
 import xml.etree.ElementTree as ET
+from xml.parsers import expat
+from xml.sax.saxutils import quoteattr
 from pathlib import PurePosixPath
 
 CORE = 'http://schemas.microsoft.com/3dmanufacturing/core/2015/02'
@@ -81,6 +83,135 @@ def origin(plate, count):
     # Orca PartPlate: ceil(sqrt(count)) columns, bed dimension * 1.2 stride.
     cols = math.ceil(math.sqrt(count))
     return ((plate - 1) % cols * 216, -((plate - 1) // cols) * 216)
+
+
+def mesh_objects(z, name):
+    # Mesh XML can exceed XML_LIMIT. Keep only object headers, never the vertices
+    # or triangles, and preserve the original mesh bytes when writing it back.
+    parser = expat.ParserCreate()
+    objects = []
+    def start(tag, attrs):
+        require(tag != 'component')  # Server-generated submodels contain meshes.
+        if tag == 'object':
+            require(len(objects) < 65535 and int(attrs['id']) > 0)
+            objects.append((parser.CurrentByteIndex, attrs))
+    def reject(*args):
+        require(False)
+    parser.StartElementHandler = start
+    parser.StartDoctypeDeclHandler = reject
+    parser.EntityDeclHandler = reject
+    with z.open(name) as src:
+        while chunk := src.read(1048576):
+            parser.Parse(chunk, False)
+    parser.Parse(b'', True)
+    require(objects and len({attrs['id'] for _, attrs in objects}) == len(objects))
+    return objects
+
+
+def unique_mesh_ids(model, settings, sources):
+    # Bambu/Orca cache shared meshes by numeric ID alone, even across .model
+    # paths. Renaming the path is insufficient: every distinct mesh needs a
+    # package-wide ID, including model_settings' part/shared-mesh references.
+    resources = model.find(f'{{{CORE}}}resources')
+    next_id = max((int(e.get('id')) for e in resources), default=0) + 1
+    meshes, ids = {}, {}
+    for path, (source, name) in sources.items():
+        if not (path.startswith('3D/Objects/') and path.endswith('.model')):
+            continue
+        meshes[path] = mesh_objects(source, name)
+        for _, attrs in meshes[path]:
+            ids[('/' + path, attrs['id'])] = str(next_id)
+            next_id += 1
+    for obj in resources:
+        parts = {}
+        for component in obj.findall(f'{{{CORE}}}components/{{{CORE}}}component'):
+            path, old = component.get(f'{{{PROD}}}path'), component.get('objectid')
+            if path:
+                require((path, old) in ids and old not in parts)
+                parts[old] = (path, ids[(path, old)])
+        config = settings.find(f"object[@id='{obj.get('id')}']")
+        if config is not None:
+            for part in config.findall('part'):
+                old = part.get('id')
+                require(old in parts)
+                path, new = parts[old]
+                shared = metadata(part, 'mesh_shared')
+                if shared is not None:
+                    require((path, shared.get('value')) in ids)
+                    shared.set('value', ids[(path, shared.get('value'))])
+                part.set('id', new)
+        for component in obj.findall(f'{{{CORE}}}components/{{{CORE}}}component'):
+            path, old = component.get(f'{{{PROD}}}path'), component.get('objectid')
+            if path:
+                new = ids[(path, old)]
+                component.set('objectid', new)
+                uuid = component.get(f'{{{PROD}}}UUID')
+                if uuid:
+                    component.set(f'{{{PROD}}}UUID', f'{int(new):08x}' + uuid[8:])
+    return meshes, ids
+
+
+def write_mesh(src, write, objects, ids, path):
+    position = 0
+    for offset, attrs in objects:
+        while position < offset:
+            chunk = src.read(min(1048576, offset - position))
+            require(chunk)
+            write(chunk)
+            position += len(chunk)
+        header, quote = bytearray(), None
+        while True:
+            chunk = src.read(1)
+            require(chunk and len(header) < 65536)
+            header.extend(chunk)
+            if quote:
+                if chunk == quote:
+                    quote = None
+            elif chunk in (b'"', b"'"):
+                quote = chunk
+            elif chunk == b'>':
+                break
+        position += len(header)
+        attrs = attrs.copy()
+        attrs['id'] = ids[('/' + path, attrs['id'])]
+        if 'p:UUID' in attrs:
+            attrs['p:UUID'] = f"{int(attrs['id']):08x}" + attrs['p:UUID'][8:]
+        end = '/>' if header.rstrip().endswith(b'/>') else '>'
+        write(('<object' + ''.join(' ' + k + '=' + quoteattr(v) for k, v in attrs.items()) + end).encode())
+    while chunk := src.read(1048576):
+        write(chunk)
+
+
+def write_archive(output_path, sources, replacements, meshes, ids, limit):
+    total = 0
+    with zipfile.ZipFile(output_path, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as output:
+        for target, (source, name) in sources.items():
+            require(len(output.namelist()) < 2000)
+            with output.open(target, 'w') as dst:
+                def write(chunk):
+                    nonlocal total
+                    total += len(chunk)
+                    require(total <= limit * 8)
+                    dst.write(chunk)
+                if target in replacements:
+                    write(replacements[target])
+                else:
+                    with source.open(name) as src:
+                        if target in meshes:
+                            write_mesh(src, write, meshes[target], ids, target)
+                        else:
+                            while chunk := src.read(1048576):
+                                write(chunk)
+    require(__import__('os').path.getsize(output_path) <= limit)
+
+
+def repair(input_path, output_path, limit):
+    with archive(input_path, limit) as source:
+        sources = {name: (source, name) for name in source.namelist()}
+        model, settings = xml(source, MODEL), xml(source, SETTINGS)
+        meshes, ids = unique_mesh_ids(model, settings, sources)
+        write_archive(output_path, sources, {MODEL: serialize(model), SETTINGS: serialize(settings)}, meshes, ids, limit)
+        print(json.dumps({'repaired': True}))
 
 
 def append(parent_path, new_path, output_path, limit):
@@ -169,6 +300,12 @@ def append(parent_path, new_path, output_path, limit):
         sliced_plate = copy.deepcopy(added_info.find('plate'))
         metadata(sliced_plate, 'index').set('value', str(plate))
         info.append(sliced_plate)
+        sources = {name: (parent, name) for name in parent.namelist()}
+        for old, target in paths.items():
+            target = target.lstrip('/')
+            require(target not in sources)
+            sources[target] = (new, old.lstrip('/'))
+        meshes, mesh_ids = unique_mesh_ids(model, settings, sources)
         replacements = {MODEL: serialize(model), SETTINGS: serialize(settings), INFO: serialize(info)}
         for name in ['3D/_rels/3dmodel.model.rels', 'Metadata/_rels/model_settings.config.rels']:
             tree = xml(parent, name)
@@ -181,30 +318,16 @@ def append(parent_path, new_path, output_path, limit):
         sequence = json.loads(read(parent, SEQUENCE))
         sequence[f'plate_{plate}'] = json.loads(read(new, SEQUENCE))['plate_1']
         replacements[SEQUENCE] = json.dumps(sequence).encode()
-        total = 0
-        with zipfile.ZipFile(output_path, 'x', compression=zipfile.ZIP_DEFLATED, compresslevel=1) as output:
-            def put(source, old, target):
-                nonlocal total
-                require(target not in output.namelist() and len(output.namelist()) < 2000)
-                with source.open(old) as src, output.open(target, 'w') as dst:
-                    while chunk := src.read(1048576):
-                        total += len(chunk)
-                        require(total <= limit * 8)
-                        dst.write(chunk)
-            for entry in parent.infolist():
-                if entry.filename in replacements:
-                    output.writestr(entry.filename, replacements[entry.filename])
-                else:
-                    put(parent, entry.filename, entry.filename)
-            for old, target in paths.items():
-                put(new, old.lstrip('/'), target.lstrip('/'))
-        require(__import__('os').path.getsize(output_path) <= limit)
+        write_archive(output_path, sources, replacements, meshes, mesh_ids, limit)
         print(json.dumps({'plate': plate}))
 
 
 if __name__ == '__main__':
     try:
-        append(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]))
+        if sys.argv[1] == '--repair':
+            repair(sys.argv[2], sys.argv[3], int(sys.argv[4]))
+        else:
+            append(sys.argv[1], sys.argv[2], sys.argv[3], int(sys.argv[4]))
     except Exception:
         # No paths, archive metadata or tool/config contents in public failures.
         print('Invalid or unsupported print container', file=sys.stderr)

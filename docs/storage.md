@@ -7,8 +7,10 @@ SeaweedFS 4.48 `weed mini` をCompose単一コンテナで使用。公式[mini�
 File: id UUID、name、format(stl/step/gcode/gcode.3mf)、size、createdAt、sourceModelId、sliceOptions、state(staging/ready/failed)、error、estimatedSeconds、filamentGrams、filamentMillimeters。オブジェクトキーはUUIDのみ。Job/PrintOperationもUUIDで管理。元モデル参照はAPIで確認してから生成。
 
 書込み順: DB staging→object put→DB ready。失敗はfailedにして未完成objectを削除。クラッシュ後stagingはHeadとsizeを照合しreadyへ修復、なければ削除しfailed。readyの消失は取得時dependency_unavailable（欠落を黙って成功にしない）。生成結果UUIDはジョブ実行前に割当て保存し、running中断時の孤立成果物をfailedとして除去。読取/ダウンロードはstream、サイズを確認。
+
+localバックエンドは起動時、単一プロセスの所有権を確保してから `objects` 直下の `<UUID>.<UUID>.tmp` 形式の通常ファイルだけを清掃し、その後stagingを照合する。確定UUIDのオブジェクト、無関係な名前、ディレクトリやシンボリックリンクは削除しない。同じアダプターで実行中のputも清掃対象から除外する。
 SQLite WAL + busy_timeout + schema user_version。DBはJSON payloadを使用し、ID/レコード種別で索引。状態遷移はサービス層で制御。削除APIは初期スコープ外、管理者は停止・バックアップ後に整合性を確認して清掃。
 
-検証: `npm run test:storage` write→read→delete。`--keep`でUUIDを残し、Compose stop/rm/up後`--read UUID`で同じ値が得られることを確認。証跡はroadmapに記録。
+検証: `npm run test:storage` write→read→delete。`--keep`でUUIDを残し、Compose stop/rm/up後`--read UUID`で同じ値が得られることを確認。実行結果と環境はGitHub Issueへ記録する。既存の証跡は[検証記録 #10](https://github.com/hapo31/pi_wedge/issues/10)を参照。
 
 job CLIログはDATA_DIR/logsへ上限付きで保存（成功/失敗）。ログにもストレージ/プリンター資格情報を渡さない。運用時のログ保持・古いジョブ整理は管理者がバックアップ後に行う。

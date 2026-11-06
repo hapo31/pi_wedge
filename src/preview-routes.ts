@@ -62,7 +62,7 @@ export function registerPreviewRoutes(
       security: [],
       summary: 'List ready slices on the trusted LAN',
       description:
-        'Public on the trusted LAN. Reads SQLite only and returns up to 24 ready slice summaries in newest-first order. Plate IDs/counts are included after first preview access; otherwise use the result UUID URL. Optional q searches display names and source model filenames; cursor is the last result UUID from the previous page. No model bodies, settings, tokens, printer state or physical side effects.',
+        'Public on the trusted LAN. Reads SQLite only and returns up to 24 ready slice summaries in newest-first order. Only the first plate of each plate set is listed; appended results are excluded before search and pagination. Plate IDs/counts are included after first preview access; otherwise use the result UUID URL. Optional q searches display names and source model filenames of listed results; cursor is the last result UUID from the previous page. No model bodies, settings, tokens, printer state or physical side effects.',
       request: {
         query: z.object({ cursor: Uuid.optional(), q: SliceNameSchema.optional() }).strict(),
       },

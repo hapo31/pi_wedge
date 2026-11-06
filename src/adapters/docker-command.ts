@@ -41,6 +41,20 @@ export class DockerCommandRunner implements CommandRunner {
       '--workdir',
       resolve(cwd),
     ];
+    if (this.config.TOOLS_WORKSPACE_DIR)
+      dockerArgs.push(
+        '--read-only',
+        '--log-driver',
+        'none',
+        '--cap-drop',
+        'ALL',
+        '--security-opt',
+        'no-new-privileges',
+        '--user',
+        `${process.getuid!()}:${process.getgid!()}`,
+        '--mount',
+        `type=bind,src=${resolve(cwd, '.tool-tmp')},dst=/tmp`,
+      );
     for (const path of new Set(mounts))
       dockerArgs.push(
         '--mount',

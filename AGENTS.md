@@ -3,7 +3,14 @@
 ## 目的・構造
 
 Raspberry Pi 5 8GB / ARM64 のLAN内でA1 mini用モデルをスライスし、UUIDで保存・プレビュー・明示的に印刷する。
-`src/domain` は型・インターフェース、`src/adapters` は外部実装、`src/services` はユースケース、`src/app.ts` はHTTP、`web` はReact、`docs` は設計・検証記録。
+`src/domain` は型・インターフェース、`src/adapters` は外部実装、`src/services` はユースケース、`src/app.ts` はHTTP、`web` はReact、`docs` は仕様・設計・導入・運用・検証手順。
+
+## ドキュメントとGitHub Issue
+
+- リポジトリにはコードと、その現行仕様・設計・制約・再実行可能な手順を記載したドキュメントを置く。
+- 一時的な調査文書、比較・検討案、作業計画、時系列の進捗・検証・反映記録はリポジトリに残さず、GitHub Issueを活用する。関連Issueがあれば追記し、なければ作成する。
+- 調査・検証の記録には実施日、対象バージョン・環境、方法・結果、出典、未確認項目を残す。モック・実ツール・実ブラウザ・実機の結果を区別し、続報はIssue本文やコメントへ記録する。
+- 採用した仕様・手順・制約は対応するドキュメントへ反映し、経緯が必要な箇所からIssueへリンクする。READMEには現行の利用方法・対応範囲・制約を記載し、過去の作業報告を蓄積しない。
 
 ## 制約
 
@@ -47,10 +54,10 @@ Vitestで抽象化、UUID、入力、キュー状態、再起動、ストレー�
 フェーズ0: サーバー/Swagger/OpenAPIとSeaweedFS再作成後の永続化。
 フェーズ1: フェイクCLI/モックで非同期→保存→UUID→転送→印刷を検証、実機の手順はdocs参照。
 フェーズ2: UIビルド、G-code抽出制限、レイヤー/印刷操作、ブラウザ確認。
-各フェーズは論理的コミット。README・roadmapに実装と検証の状態を別々に記録。
+各フェーズは論理的コミット。実装と検証の状態を区別し、経過・結果・残作業はGitHub Issueで管理する。
 
 ## 変更後チェック
 
-`npm run check`（型、Lint、Format、Vitest、サーバー/UIビルド）。S3変更時は `npm run test:storage` とComposeコンテナ再作成後の読取。ハードウェア検証はdocs/slicer.md・docs/printer.mdに記録。生成ファイル、.env、秘密、データをコミットしない。
+`npm run check`（型、Lint、Format、Vitest、サーバー/UIビルド）。S3変更時は `npm run test:storage` とComposeコンテナ再作成後の読取。ハードウェア検証の手順はdocs/slicer.md・docs/printer.mdに維持し、実行結果は対応するGitHub Issueへ記録する。生成ファイル、.env、秘密、データをコミットしない。
 
-実ブラウザ変更はAPIサーバー起動後 `npm run test:e2e`。実CLI変更は `npm run test:slice -- MODEL`（実ストレージへ保存、印刷しない）。検証済みツール: Orca2.4.2/FreeCAD1.0、ARM64 Debian13。Debian12へのOrca直接導入はglibc非互換。最新の実機/ソフトウェア検証結果はdocs/verification.mdへ記録する。
+実ブラウザ変更はAPIサーバー起動後 `npm run test:e2e`。実CLI変更は `npm run test:slice -- MODEL`（実ストレージへ保存、印刷しない）。対象ツール: Orca2.4.2/FreeCAD1.0、ARM64 Debian13。Debian12へのOrca直接導入はglibc非互換。実機/ソフトウェアの検証結果はGitHub Issueへ記録する。

@@ -176,22 +176,39 @@ describe('confirmed print UI controller', () => {
     await controller.start(id);
     expect(send.mock.calls[1]?.[1]).toBe(key);
   });
-  it('shows accepted and unknown distinctly and never sends again after accepted', async () => {
-    const send = vi.fn(async () => ({ id: randomUUID(), state: 'accepted' as const, error: null })),
-      update = vi.fn(),
-      controller = new PrintController(send, update, () => true);
-    await controller.start(randomUUID());
-    await controller.start(randomUUID());
+  it('starts another print only after confirmation and with a new key', async () => {
+    const send = vi.fn(async (_id: string, key: string) => ({
+      id: key,
+      state: 'accepted' as const,
+      error: null,
+    }));
+    const confirm = vi
+      .fn()
+      .mockReturnValueOnce(true)
+      .mockReturnValueOnce(false)
+      .mockReturnValueOnce(true);
+    const update = vi.fn(),
+      controller = new PrintController(send, update, confirm),
+      id = randomUUID();
+    await controller.start(id);
+    await controller.start(id);
     expect(send).toHaveBeenCalledOnce();
+    await controller.start(id);
+    expect(send).toHaveBeenCalledTimes(2);
+    expect(send.mock.calls[0]?.[1]).not.toBe(send.mock.calls[1]?.[1]);
     expect(update).toHaveBeenLastCalledWith(
       expect.objectContaining({ busy: false, message: expect.stringContaining('受け付け') }),
     );
-    const unknownUpdate = vi.fn();
-    await new PrintController(
-      async () => ({ id: randomUUID(), state: 'unknown', error: null }),
-      unknownUpdate,
-      () => true,
-    ).start(randomUUID());
+    const unknownSend = vi.fn(async () => ({
+      id: randomUUID(),
+      state: 'unknown' as const,
+      error: null,
+    }));
+    const unknownUpdate = vi.fn(),
+      unknown = new PrintController(unknownSend, unknownUpdate, () => true);
+    await unknown.start(id);
+    await unknown.start(id);
+    expect(unknownSend).toHaveBeenCalledOnce();
     expect(unknownUpdate).toHaveBeenLastCalledWith(
       expect.objectContaining({ message: expect.stringContaining('結果が不明') }),
     );

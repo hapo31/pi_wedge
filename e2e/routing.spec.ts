@@ -382,7 +382,7 @@ test('ignores a late plate response and restores each plate print outcome and AM
       void dialog.accept();
     });
     await page.getByRole('button', { name: '印刷', exact: true }).click();
-    await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
     await page.getByRole('button', { name: 'プレート 1', exact: true }).click();
     await ready(page);
     await expect(page.getByRole('button', { name: '結果不明', exact: true })).toBeDisabled();
@@ -393,7 +393,7 @@ test('ignores a late plate response and restores each plate print outcome and AM
     await page.goBack();
     await expect(page).toHaveURL(`/preview/${plateId}/${third.id}`);
     await ready(page);
-    await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+    await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
     expect(prints).toHaveLength(2);
     expect(prints[0]).toMatchObject({
       previewId: first.id,

@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { Slicer, ModelConverter, ModelFile, ParentPlateInput } from '../domain/contracts.js';
+import type {
+  Slicer,
+  ModelConverter,
+  ModelFile,
+  ParentPlateInput,
+  JobWorkspace,
+} from '../domain/contracts.js';
 import type { SliceOptions, SliceJob } from '../domain/schemas.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
@@ -11,6 +17,7 @@ import { FileService } from './files.js';
 export class JobService {
   private active = new Set<Promise<void>>();
   private stopping = false;
+  private persistenceFault = false;
   constructor(
     private files: FileService,
     private slicer: Slicer,
@@ -18,6 +25,7 @@ export class JobService {
     private dataDir: string,
     private concurrency: number,
     private maxQueued: number,
+    private workspace?: JobWorkspace,
   ) {}
   get(id: string): SliceJob {
     const job = this.files.repository.get('job', Uuid.parse(id));
@@ -28,6 +36,8 @@ export class JobService {
   }
   assertCapacity() {
     if (this.stopping) throw new AppError('shutting_down', 'Server is stopping', 503);
+    if (this.persistenceFault)
+      throw new AppError('job_persistence', 'Job processing requires a server restart', 503);
     if (
       this.files.repository.all('job').filter((j) => j.state === 'queued').length >= this.maxQueued
     )
@@ -98,27 +108,43 @@ export class JobService {
     return this.get(job.id);
   }
   private pump() {
-    if (this.stopping) return;
-    for (const job of this.files.repository.all('job').filter((j) => j.state === 'queued')) {
-      if (this.active.size >= this.concurrency) break;
-      job.state = 'running';
-      job.startedAt = new Date().toISOString();
-      this.files.repository.save('job', job);
-      const task = this.run(job.id).finally(() => {
-        this.active.delete(task);
-        this.pump();
-      });
-      this.active.add(task);
-      void task.catch((error) => logError('job_persistence', job.id, error));
+    if (this.stopping || this.persistenceFault) return;
+    try {
+      for (const job of this.files.repository.all('job').filter((j) => j.state === 'queued')) {
+        if (this.active.size >= this.concurrency) break;
+        job.state = 'running';
+        job.startedAt = new Date().toISOString();
+        this.files.repository.save('job', job);
+        const task = this.run(job.id)
+          .catch((error) => {
+            this.persistenceFault = true;
+            throw error;
+          })
+          .finally(() => {
+            this.active.delete(task);
+            this.pump();
+          });
+        this.active.add(task);
+        void task.catch((error) => {
+          this.persistenceFault = true;
+          logError('job_persistence', job.id, error);
+        });
+      }
+    } catch (error) {
+      this.persistenceFault = true;
+      logError('job_persistence', 'queue', error);
     }
   }
   private async run(id: string) {
     const job = this.files.repository.get('job', id)!;
     let workDir: string | undefined;
     try {
-      const root = resolve(this.dataDir, 'tmp');
-      await mkdir(root, { recursive: true });
-      workDir = await mkdtemp(join(root, 'slice-'));
+      if (this.workspace) workDir = await this.workspace.create();
+      else {
+        const root = resolve(this.dataDir, 'tmp');
+        await mkdir(root, { recursive: true });
+        workDir = await mkdtemp(join(root, 'slice-'));
+      }
       const f = this.files.ready(job.modelId);
       const path = join(workDir, `model.${f.format}`);
       await this.files.materialize(f.id, path);
@@ -196,36 +222,42 @@ export class JobService {
       await this.files.abandon(job.reservedResultId).catch((e) => logError('job_cleanup', id, e));
     } finally {
       job.finishedAt = new Date().toISOString();
-      this.files.repository.save('job', job);
-      if (workDir) {
-        const logs = [];
-        for (const name of ['freecad.log', 'orca.log', 'append.log']) {
-          try {
-            logs.push(name + '\n' + (await readFile(join(workDir, name), 'utf8')));
-          } catch {
-            /* Tool was not invoked or failed before logging. */
+      try {
+        this.files.repository.save('job', job);
+      } finally {
+        if (workDir) {
+          const logs = [];
+          for (const name of ['freecad.log', 'orca.log', 'append.log']) {
+            try {
+              logs.push(name + '\n' + (await readFile(join(workDir, name), 'utf8')));
+            } catch {
+              /* Tool was not invoked or failed before logging. */
+            }
+          }
+          if (logs.length) {
+            try {
+              await mkdir(resolve(this.dataDir, 'logs'), { recursive: true });
+              await writeFile(resolve(this.dataDir, 'logs', `${id}.log`), logs.join('\n'), {
+                mode: 0o600,
+              });
+            } catch (e) {
+              logError('job_log', id, e);
+            }
           }
         }
-        if (logs.length) {
-          try {
-            await mkdir(resolve(this.dataDir, 'logs'), { recursive: true });
-            await writeFile(resolve(this.dataDir, 'logs', `${id}.log`), logs.join('\n'), {
-              mode: 0o600,
-            });
-          } catch (e) {
-            logError('job_log', id, e);
-          }
-        }
+        if (workDir)
+          await (
+            this.workspace
+              ? this.workspace.remove(workDir)
+              : rm(workDir, { recursive: true, force: true })
+          ).catch((e) => logError('temp_cleanup', id, e));
       }
-      if (workDir)
-        await rm(workDir, { recursive: true, force: true }).catch((e) =>
-          logError('temp_cleanup', id, e),
-        );
     }
   }
   async recover() {
     // No other process may own DATA_DIR; stale workspaces belong to interrupted jobs.
-    await rm(resolve(this.dataDir, 'tmp'), { recursive: true, force: true });
+    if (this.workspace) await this.workspace.recover();
+    else await rm(resolve(this.dataDir, 'tmp'), { recursive: true, force: true });
     for (const job of this.files.repository.all('job').filter((j) => j.state === 'running')) {
       await this.files.abandon(job.reservedResultId);
       job.state = 'failed';
@@ -245,6 +277,7 @@ export class JobService {
   async idle() {
     while (this.active.size || this.files.repository.all('job').some((j) => j.state === 'queued')) {
       this.pump();
+      if (this.persistenceFault) throw new Error('Job processing requires a server restart');
       await Promise.all(this.active);
     }
   }

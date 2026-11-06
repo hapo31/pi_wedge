@@ -73,13 +73,17 @@ describe('append slices to a root preview UUID', () => {
     const download = await c.app.request(`/preview/${group.id}/download`);
     expect((await download.arrayBuffer()).byteLength).toBe(c.files.ready(latest.fileId).size);
     const history = await (await c.app.request('/history/data')).json();
-    expect(history.items).toHaveLength(3);
-    expect(
-      history.items.every(
-        (i: { plateId: string; plateCount: number }) =>
-          i.plateId === group.id && i.plateCount === 3,
-      ),
-    ).toBe(true);
+    expect(history.items).toEqual([
+      expect.objectContaining({
+        id: root,
+        name: '親',
+        plateId: group.id,
+        previewId: root,
+        plateCount: 3,
+      }),
+    ]);
+    expect(history.nextCursor).toBeNull();
+    expect((await (await c.app.request('/history/data?q=追加')).json()).items).toEqual([]);
     expect(c.adapter.upload).not.toHaveBeenCalled();
     expect(c.adapter.startPrint).not.toHaveBeenCalled();
     const reopened = new Repository(join(c.dir, 'metadata.sqlite'));

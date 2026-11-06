@@ -93,6 +93,7 @@ export class Repository {
        ON m.kind='file' AND m.id=json_extract(f.payload,'$.sourceModelId')
        WHERE f.kind='file' AND json_extract(f.payload,'$.state')='ready'
        AND json_extract(f.payload,'$.format') IN ('gcode','gcode.3mf')
+       AND json_extract(f.payload,'$.parentId') IS NULL
        AND json_extract(f.payload,'$.sourceModelId') IS NOT NULL ${condition} ${search}
        ORDER BY json_extract(f.payload,'$.createdAt') DESC, f.id DESC LIMIT ?`,
     );

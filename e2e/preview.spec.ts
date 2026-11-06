@@ -41,6 +41,7 @@ test('WebGL layers, stats, confirmation and one explicit print request', async (
   const pageErrors: string[] = [];
   page.on('pageerror', (e) => pageErrors.push(e.message));
   let prints = 0;
+  const printKeys: string[] = [];
   await page.route(
     /\/preview\/[^/]+\/(?:data|gcode|printer|print|download|thumbnail)(?:\?.*)?$/,
     async (route) => {
@@ -49,6 +50,7 @@ test('WebGL layers, stats, confirmation and one explicit print request', async (
       if (path.endsWith('/printer')) return route.fulfill({ json: ams });
       if (path === `/preview/${id}/print`) {
         prints++;
+        printKeys.push(route.request().headers()['idempotency-key']!);
         expect(route.request().postDataJSON()).toEqual({ useAms: true, amsMapping: [1] });
         expect(route.request().headers()['idempotency-key']).toMatch(/^[\da-f-]{36}$/);
         expect(route.request().headers().authorization).toBeUndefined();
@@ -106,17 +108,30 @@ test('WebGL layers, stats, confirmation and one explicit print request', async (
   expect(prints).toBe(0);
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: '印刷', exact: true }).click();
-  await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
   expect(prints).toBe(1);
   expect(pageErrors).toEqual([]);
   await page.reload();
   await expect(page.getByRole('slider', { name: 'レイヤー', exact: true })).toBeEnabled();
-  await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
   await expect(page.getByRole('button', { name: 'AMS スロット2', exact: true })).toHaveAttribute(
     'aria-pressed',
     'true',
   );
   expect(prints).toBe(1);
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toContain('前回の造形物と印刷状態を確認してください。');
+    void dialog.dismiss();
+  });
+  await page.getByRole('button', { name: 'もう一度印刷', exact: true }).click();
+  expect(prints).toBe(1);
+  page.once('dialog', (dialog) => {
+    expect(dialog.message()).toContain('前回の造形物と印刷状態を確認してください。');
+    void dialog.accept();
+  });
+  await page.getByRole('button', { name: 'もう一度印刷', exact: true }).click();
+  await expect.poll(() => prints).toBe(2);
+  expect(printKeys[0]).not.toBe(printKeys[1]);
   await page.setViewportSize({ width: 390, height: 844 });
   await page.screenshot({ path: testInfo.outputPath('preview-mobile.png'), fullPage: true });
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(
@@ -361,7 +376,7 @@ test('switches thumbnail previews with nested URLs, history navigation and indep
   );
   page.once('dialog', (dialog) => dialog.accept());
   await page.getByRole('button', { name: '印刷', exact: true }).click();
-  await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
   await page.getByRole('button', { name: 'プレート 3', exact: true }).click();
   await expect(page).toHaveURL(`/preview/${plateId}/${secondId}`);
   await expect(slider).toHaveAttribute('max', '3');
@@ -370,7 +385,7 @@ test('switches thumbnail previews with nested URLs, history navigation and indep
   await expect(page.getByRole('button', { name: '印刷', exact: true })).toBeEnabled();
   await page.goBack();
   await expect(page).toHaveURL(`/preview/${plateId}/${id}`);
-  await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
   await page.goForward();
   await expect(page).toHaveURL(`/preview/${plateId}/${secondId}`);
   await page.reload();
@@ -380,7 +395,7 @@ test('switches thumbnail previews with nested URLs, history navigation and indep
     void dialog.accept();
   });
   await page.getByRole('button', { name: '印刷', exact: true }).click();
-  await expect(page.getByRole('button', { name: '受付済み', exact: true })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'もう一度印刷', exact: true })).toBeEnabled();
   expect(keys).toHaveLength(2);
   expect(keys[0]).not.toBe(keys[1]);
   await page.setViewportSize({ width: 390, height: 844 });

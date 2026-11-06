@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { randomUUID } from 'node:crypto';
 import { Readable } from 'node:stream';
-import { readdir } from 'node:fs/promises';
+import { readdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { setup, MODEL } from './helpers.js';
 import { SliceOptionsSchema, PrintOptionsSchema } from '../src/domain/schemas.js';
@@ -33,6 +33,40 @@ describe('storage and metadata contracts', () => {
     await expect(c.storage.put('../escape', Readable.from('x'), 1)).rejects.toThrow();
     await expect(c.storage.put(id, Readable.from('wrong'), 1)).rejects.toThrow();
     expect((await readdir(join(c.dir, 'objects'))).length).toBe(0);
+  });
+  it('removes abandoned local temporary files without removing active writes or committed objects', async () => {
+    const c = await context();
+    const id = randomUUID(),
+      other = randomUUID();
+    await c.storage.put(id, Readable.from('ready'), 5);
+    const orphan = `${other}.${randomUUID()}.tmp`;
+    await writeFile(join(c.dir, 'objects', orphan), 'partial');
+    await writeFile(join(c.dir, 'objects', 'unrelated.tmp'), 'keep');
+    let release!: () => void;
+    const gate = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    const stream = Readable.from(
+      (async function* () {
+        yield 'a';
+        await gate;
+        yield 'b';
+      })(),
+    );
+    const writing = c.storage.put(other, stream, 2);
+    while (
+      !(await readdir(join(c.dir, 'objects'))).some(
+        (name) => name.startsWith(`${other}.`) && name !== orphan,
+      )
+    )
+      await new Promise((resolve) => setTimeout(resolve, 1));
+    await c.storage.recover();
+    expect(await readdir(join(c.dir, 'objects'))).not.toContain(orphan);
+    expect(await c.storage.head(id)).toEqual({ size: 5 });
+    expect(await readdir(join(c.dir, 'objects'))).toContain('unrelated.tmp');
+    release();
+    await writing;
+    expect(await c.storage.head(other)).toEqual({ size: 2 });
   });
   it('creates unique model UUIDs and survives database restart', async () => {
     const c = await context();
@@ -158,6 +192,42 @@ describe('persistent asynchronous jobs and swappable slicer', () => {
     await c.jobs.idle();
     expect(max).toBe(1);
   });
+  it('stops the queue after a database failure and recovers queued work on restart', async () => {
+    const c = await context(),
+      f = await c.files.upload(new File([MODEL], 'a.stl'));
+    const save = vi.spyOn(c.repository, 'save').mockImplementationOnce(() => {
+      throw new Error('database unavailable');
+    });
+    const job = c.jobs.create(f.id, SliceOptionsSchema.parse({}));
+    await new Promise((resolve) => setImmediate(resolve));
+    expect(c.repository.get('job', job.id)?.state).toBe('queued');
+    expect(c.slicer.slice).not.toHaveBeenCalled();
+    expect(() => c.jobs.create(f.id, SliceOptionsSchema.parse({}))).toThrow('restart');
+    save.mockRestore();
+    const restarted = new (
+      c.jobs.constructor as typeof import('../src/services/jobs.js').JobService
+    )(c.files, c.slicer, c.converter, c.dir, 1, 20);
+    await restarted.recover();
+    await restarted.idle();
+    expect(restarted.get(job.id).state).toBe('succeeded');
+  });
+  it('cleans the work directory even when saving a completed job fails', async () => {
+    const c = await context(),
+      f = await c.files.upload(new File([MODEL], 'a.stl'));
+    const original = c.repository.save.bind(c.repository);
+    const save = vi.spyOn(c.repository, 'save').mockImplementation((kind, value) => {
+      if (kind === 'job' && 'state' in value && value.state === 'succeeded')
+        throw new Error('database unavailable');
+      return original(kind, value);
+    });
+    const job = c.jobs.create(f.id, SliceOptionsSchema.parse({}));
+    await expect(c.jobs.idle()).rejects.toThrow();
+    expect(await readdir(join(c.dir, 'tmp'))).toEqual([]);
+    expect(c.repository.get('job', job.id)?.state).toBe('running');
+    save.mockRestore();
+    await c.jobs.recover();
+    expect(c.jobs.get(job.id).state).toBe('failed');
+  });
   it('fails interrupted running jobs and discards their unfinished result', async () => {
     const c = await context(),
       f = await c.files.upload(new File([MODEL], 'a.stl')),
@@ -202,6 +272,44 @@ describe('printer orchestration and persistent idempotency', () => {
       c.printer.print(id, { ...options, bedLeveling: false }, key),
     ).rejects.toMatchObject({ status: 409 });
   });
+  it('releases the print lock if the pending insert fails before dispatch', async () => {
+    const c = await context(),
+      id = await artifact(c);
+    const insert = vi.spyOn(c.repository, 'insert').mockImplementationOnce(() => {
+      throw new Error('database unavailable');
+    });
+    await expect(c.printer.print(id, PrintOptionsSchema.parse({}), randomUUID())).rejects.toThrow();
+    insert.mockRestore();
+    expect(c.adapter.startPrint).not.toHaveBeenCalled();
+    expect((await c.printer.stopPrint(randomUUID())).state).toBe('accepted');
+    await c.printer.stop();
+  });
+  it.each(['print', 'stop'] as const)(
+    'releases the lock but keeps pending after %s outcome save fails',
+    async (action) => {
+      const c = await context(),
+        id = await artifact(c),
+        key = randomUUID();
+      const save = vi.spyOn(c.repository, 'save').mockImplementationOnce(() => {
+        throw new Error('database unavailable');
+      });
+      await expect(
+        action === 'print'
+          ? c.printer.print(id, PrintOptionsSchema.parse({}), key)
+          : c.printer.stopPrint(key),
+      ).rejects.toThrow();
+      save.mockRestore();
+      expect(c.printer.get(key).state).toBe('pending');
+      await expect(
+        c.printer.print(id, PrintOptionsSchema.parse({}), randomUUID()),
+      ).rejects.toMatchObject({ code: 'printer_outcome_unknown' });
+      if (action === 'print')
+        expect((await c.printer.stopPrint(randomUUID())).state).toBe('accepted');
+      await c.printer.stop();
+      await c.printer.recover();
+      expect(c.printer.get(key).state).toBe('unknown');
+    },
+  );
   it('records unknown without resending and blocks new keys until inspected', async () => {
     const c = await context({
         printer: {

@@ -13,6 +13,11 @@ export interface ModelFile {
   format: 'stl' | 'step';
   workDir: string;
 }
+export interface JobWorkspace {
+  create(): Promise<string>;
+  remove(directory: string): Promise<void>;
+  recover(): Promise<void>;
+}
 export interface ParentPlateInput {
   path: string;
   plate: number;
