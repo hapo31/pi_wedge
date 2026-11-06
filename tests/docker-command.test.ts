@@ -50,6 +50,29 @@ it('removes the daemon container even if the Docker CLI times out', async () => 
   ).rejects.toMatchObject({ code: 'command_timeout' });
   expect(cleanup.run).toHaveBeenCalledOnce();
 });
+it('uses the same bounded filesystem for /tmp and a read-only root in configured workspace mode', async () => {
+  const runner = { run: vi.fn(async () => ({ stdout: '', stderr: '' })) };
+  await new DockerCommandRunner(
+    runner,
+    { ...config, TOOLS_WORKSPACE_DIR: '/tmp/bounded-mount' },
+    runner,
+  ).run('python3', [], '/tmp/bounded-mount/job');
+  expect(runner.run.mock.calls[0]).toEqual([
+    'docker',
+    expect.arrayContaining([
+      '--read-only',
+      '--log-driver',
+      'none',
+      '--cap-drop',
+      'ALL',
+      '--user',
+      `${process.getuid!()}:${process.getgid!()}`,
+      'type=bind,src=/tmp/bounded-mount/job/.tool-tmp,dst=/tmp',
+      'type=bind,src=/tmp/trusted-profiles,dst=/tmp/trusted-profiles,readonly',
+    ]),
+    '/tmp/bounded-mount/job',
+  ]);
+});
 it('recovers only containers labelled with the current data directory', async () => {
   const cleanup = {
     run: vi.fn(async (_command: string, args: string[]) => ({

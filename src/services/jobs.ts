@@ -1,7 +1,13 @@
 import { randomUUID } from 'node:crypto';
 import { mkdir, mkdtemp, rm, writeFile, readFile } from 'node:fs/promises';
 import { join, resolve } from 'node:path';
-import type { Slicer, ModelConverter, ModelFile, ParentPlateInput } from '../domain/contracts.js';
+import type {
+  Slicer,
+  ModelConverter,
+  ModelFile,
+  ParentPlateInput,
+  JobWorkspace,
+} from '../domain/contracts.js';
 import type { SliceOptions, SliceJob } from '../domain/schemas.js';
 import { Uuid } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
@@ -19,6 +25,7 @@ export class JobService {
     private dataDir: string,
     private concurrency: number,
     private maxQueued: number,
+    private workspace?: JobWorkspace,
   ) {}
   get(id: string): SliceJob {
     const job = this.files.repository.get('job', Uuid.parse(id));
@@ -132,9 +139,12 @@ export class JobService {
     const job = this.files.repository.get('job', id)!;
     let workDir: string | undefined;
     try {
-      const root = resolve(this.dataDir, 'tmp');
-      await mkdir(root, { recursive: true });
-      workDir = await mkdtemp(join(root, 'slice-'));
+      if (this.workspace) workDir = await this.workspace.create();
+      else {
+        const root = resolve(this.dataDir, 'tmp');
+        await mkdir(root, { recursive: true });
+        workDir = await mkdtemp(join(root, 'slice-'));
+      }
       const f = this.files.ready(job.modelId);
       const path = join(workDir, `model.${f.format}`);
       await this.files.materialize(f.id, path);
@@ -236,15 +246,18 @@ export class JobService {
           }
         }
         if (workDir)
-          await rm(workDir, { recursive: true, force: true }).catch((e) =>
-            logError('temp_cleanup', id, e),
-          );
+          await (
+            this.workspace
+              ? this.workspace.remove(workDir)
+              : rm(workDir, { recursive: true, force: true })
+          ).catch((e) => logError('temp_cleanup', id, e));
       }
     }
   }
   async recover() {
     // No other process may own DATA_DIR; stale workspaces belong to interrupted jobs.
-    await rm(resolve(this.dataDir, 'tmp'), { recursive: true, force: true });
+    if (this.workspace) await this.workspace.recover();
+    else await rm(resolve(this.dataDir, 'tmp'), { recursive: true, force: true });
     for (const job of this.files.repository.all('job').filter((j) => j.state === 'running')) {
       await this.files.abandon(job.reservedResultId);
       job.state = 'failed';

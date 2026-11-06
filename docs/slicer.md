@@ -49,6 +49,33 @@ Xvfbはディスプレイ初期化が必要なビルドのための任意設定�
 
 DockerCommandRunnerがジョブ領域・プロファイル・固定の変換スクリプトだけをマウントし、ネットワーク無効・image pull無効で実行する（イメージは事前ビルド必須）。S3/プリンター/API資格情報をツールへ渡さない。CLI timeout後にコンテナを強制削除し、起動時はDATA_DIRラベルの残存コンテナを回収する。コンテナ回収に失敗した場合は依存復旧失敗として受付を止める。4GiB/3CPU/256PID上限はDockerに指定する。導入先ホストでcgroupと実際の上限動作を確認する。
 
+## 実行中の作業領域上限（任意設定）
+
+既定の `DATA_DIR/tmp` は通常のディスク領域で、成果物のサイズ検査とタイムアウトだけでは中間ファイルの合計容量を制限しない。容量を制限する場合は、管理者がアプリ専用の[tmpfs](https://docs.kernel.org/filesystems/tmpfs.html)を用意し、`TOOLS_WORKSPACE_DIR` にそのマウントポイントの絶対パス、`TOOLS_WORKSPACE_MAX_MB` に許容する最大容量（既定1024MiB、範囲1〜4096MiB）を設定する。ディレクトリ未設定なら従来の動作になる。アプリがmountやsudoを実行することはない。
+
+例として、サービスを停止した状態で `/var/lib/pi_wedge-work` を作成し、`/etc/fstab` に次を設定する。`<UID>` と `<GID>` は `id -u pi_wedge` / `id -g pi_wedge` の数値へ置き換える。
+
+```fstab
+tmpfs /var/lib/pi_wedge-work tmpfs rw,nosuid,nodev,size=1G,nr_inodes=65536,uid=<UID>,gid=<GID>,mode=0700 0 0
+```
+
+`sudo mount /var/lib/pi_wedge-work` 後に `findmnt /var/lib/pi_wedge-work` と `df -B1 /var/lib/pi_wedge-work` でtmpfsと総容量を確認し、`.env` に以下を設定する。パスは `DATA_DIR` / `PROFILE_DIR` と親子関係を持たない専用マウントにする。
+
+```dotenv
+TOOLS_WORKSPACE_DIR=/var/lib/pi_wedge-work
+TOOLS_WORKSPACE_MAX_MB=1024
+```
+
+同梱systemdサービスではdrop-inの `[Unit]` に `RequiresMountsFor=/var/lib/pi_wedge-work`、`[Service]` に `ReadWritePaths=/var/lib/pi_wedge-work` を追加し、daemon-reload後に起動する。root所有の通常ディレクトリを同じパスへ残しておけば、未マウント時にサービスユーザーがそこへ書き込むことも防げる。
+
+起動時にtmpfsの種別・総容量・独立したマウントポイント・パスの分離を検査し、失敗した場合はデータAPIを無効にする。ジョブ作成とCLI実行の直前、清掃・復旧時も再検査し、マウントの消失や置換を検出した場合は通常ディスクへ切り替えず失敗にする。起動中に管理者がマウントを変更しないこと。実行中の強制アンマウントとの競合までをアプリで保証するものではない。復旧時はマウント直下のアプリ所有サブディレクトリだけを清掃し、マウントや他のファイルは残す。
+
+native/dockerとも入力・変換・スライス・結合の作業領域をこのtmpfs上へ作り、HOME、TMPDIR、TMP、TEMP、XDG_CACHE_HOME、XDG_CONFIG_HOMEもその中へ設定する。FreeCADはHOMEを参照しないため、[公式のFREECAD_USER_HOME](https://github.com/FreeCAD/FreeCAD/blob/1.0.0/src/App/Application.cpp)も同じ領域へ指定する。FreeCADのデータと一時ファイルもこの指定先に作られる。容量上限はカーネルが書込み時に適用し、超過時はENOSPCなどでコマンド/ジョブが失敗する。出力サイズ検査・タイムアウト・finally清掃も維持する。
+
+この設定のDocker実行では、追加でrootファイルシステムをread-onlyにし、ホストと同じUID/GIDで実行する。プロファイルと固定スクリプトはread-onlyのまま、`/tmp` も同じ作業tmpfsへbindする。daemon側のログは `--log-driver none` で保存せず、アプリがattach経由のstdout/stderrを既存のバイト上限で取得する。Dockerの `/dev/shm` などの別領域はこの合計に含まず、各領域に別の容量上限がある。コンテナのメモリ上限にはホストのmemory cgroup対応と有効化が必要であり、非対応ならDockerが指定を無視するため導入時に実効性を確認する（[Docker実行オプション](https://docs.docker.com/engine/containers/run/)）。nativeはプロセスのファイルアクセスを隔離しないため、環境設定を無視して他のパスへ書くツールの動作までは制限しない。
+
+tmpfsはRAMと、設定されていればswapを使う。Pi 8GBではツール本体・Node・OS・他サービスの使用量を含めて容量を決める。作業領域が満杯になる前のメモリ不足を防ぐ保証ではない。実Orca/FreeCADの必要容量や制限モードでの互換性は導入先で小さいSTL/STEPと追加プレートを使って確認し、結果は[Issue #20](https://github.com/hapo31/pi_wedge/issues/20)へ記録する。
+
 ## プレートへの追加
 
 `Slicer.slice`は任意の内部`ParentPlateInput`（ジョブ領域の親3MFパスと次の枚番号）を受け取れる。新しいSTL/変換済みSTEPを通常通り1枚だけOrcaでスライスした後、Orcaアダプター内から固定の`scripts/append-plate.py`を実行して結合する。Python標準ライブラリのみを使用し、native/dockerとも既存のCommandRunnerのタイムアウト・上限ログ・秘密を除いた環境を使う。Dockerでは固定スクリプトを読取専用でマウントする。

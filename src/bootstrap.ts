@@ -4,6 +4,7 @@ import { Repository } from './adapters/repository.js';
 import { S3Storage, LocalStorage } from './adapters/storage.js';
 import { DockerCommandRunner } from './adapters/docker-command.js';
 import { ProcessRunner } from './adapters/command.js';
+import { BoundedToolWorkspace, WorkspaceCommandRunner } from './adapters/tool-workspace.js';
 import { OrcaSlicerAdapter } from './adapters/orca.js';
 import { FreeCadConverter } from './adapters/converter.js';
 import { BambuLanPrinter, DisabledPrinter } from './adapters/printer.js';
@@ -58,10 +59,12 @@ export async function bootstrap(config: Config) {
     config.MAX_ARTIFACT_MB * 1048576,
   );
   const nativeRunner = new ProcessRunner(config.COMMAND_TIMEOUT_MS);
-  const runner =
+  const toolRunner =
     config.TOOLS_BACKEND === 'docker'
       ? new DockerCommandRunner(nativeRunner, config)
       : nativeRunner;
+  const workspace = config.TOOLS_WORKSPACE_DIR ? new BoundedToolWorkspace(config) : undefined;
+  const runner = workspace ? new WorkspaceCommandRunner(toolRunner, workspace) : toolRunner;
   const jobs = new JobService(
     files,
     new OrcaSlicerAdapter(runner, config),
@@ -74,6 +77,7 @@ export async function bootstrap(config: Config) {
     config.DATA_DIR,
     config.SLICE_CONCURRENCY,
     config.MAX_QUEUED_JOBS,
+    workspace,
   );
   const printer = new PrinterService(
     files,
@@ -84,7 +88,8 @@ export async function bootstrap(config: Config) {
   // A unavailable storage must not prevent liveness/docs; keep API disabled until recovery succeeds.
   let ready = false;
   try {
-    if (runner instanceof DockerCommandRunner) await runner.recover();
+    if (toolRunner instanceof DockerCommandRunner) await toolRunner.recover();
+    if (workspace) await workspace.check();
     await storage.check();
     if (storage instanceof LocalStorage) await storage.recover();
     await files.recover();
@@ -94,7 +99,7 @@ export async function bootstrap(config: Config) {
     ready = true;
   } catch {
     console.error(
-      'Dependency recovery failed; data APIs are disabled. Restart after restoring storage.',
+      'Dependency recovery failed; data APIs are disabled. Restore storage/tools and restart.',
     );
   }
   return {

@@ -20,6 +20,11 @@ const envSchema = z.object({
   MAX_QUEUED_JOBS: z.coerce.number().int().min(1).max(100).default(20),
   COMMAND_TIMEOUT_MS: z.coerce.number().int().min(1000).max(3600000).default(600000),
   TOOLS_BACKEND: z.enum(['native', 'docker']).default('native'),
+  TOOLS_WORKSPACE_DIR: z
+    .string()
+    .regex(/^[^\0,\r\n]*$/)
+    .default(''),
+  TOOLS_WORKSPACE_MAX_MB: z.coerce.number().int().min(1).max(4096).default(1024),
   TOOLS_IMAGE: z
     .string()
     .regex(/^[a-zA-Z0-9_./:@-]+$/)
