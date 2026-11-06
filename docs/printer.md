@@ -14,11 +14,15 @@ AI/管理用の印刷APIはBearer + Idempotency-Key必須。LANのブラウザ�
 
 ## 実機検証（未実施なら未検証と表示）
 
+印刷・停止の実行には、その時点の明示指示を受ける。
+
 1. 型番/firmware/serial/IP、LAN Only/Developer Mode、SDカード、TLS証明書を記録。A1 miniのアクセスコードでFTPS一覧とMQTT接続を確認。
 2. 20mm cubeをStudioで確認し、upload APIだけを実行。プリンター側にUUID.gcode.3mfが同じサイズで存在し、機構が動かないことを確認。
 3. ベッドを空にして材料/プレートを確認し、明示的print APIを一度実行。ftp:///UUID.gcode.3mf、Metadata/plate_1.gcode、sequence_id ACK、実際の開始を記録。形式/パスが不一致ならアダプターのみ調整する。
 4. 同一キー再送で2回目の開始がないこと、別内容409、通信断時unknown、再起動後も同一キーで再送しないことを確認。
-5. bedLeveling/AMS mappingは個別に確認。mockの成功を上記の成功と記載しない。
+5. bedLeveling、外部スプール/AMS各選択スロット、複数プレートの選択は、一度に1条件だけ変更して都度1回の明示印刷で確認する。指定した設定と実際の供給元・印刷された枚を記録する。mockの成功を実機の成功と記載しない。
+6. 造形完了まで確認し、モデルの予定寸法と実測X/Y/Z、反り・層ずれ・ベッドへの接着の状態を記録する。受付ACK・RUNNING・造形完了・品質を別々に評価する。
+7. Bambu Studioの版を記録し、複製した単一/複数プレートの成果物をGUIで読み込む。各枚の異なる形状・寸法・設定を確認し、別名で再編集保存して再読込する。元の成果物を変更せず、この読込確認ではプリンターへ転送しない。
 
 結果不明の操作が残る場合は新しいキーの印刷も409で止める。実機画面・ベッドを確認した後のみ `POST /api/printer/operations/{operationId}/resolve` に `outcome`（accepted/failed）と `inspectionNote` を送信して解決する。このAPI自体は機器を動かさない。
 
