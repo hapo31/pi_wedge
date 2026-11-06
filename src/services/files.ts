@@ -3,6 +3,7 @@ import { createReadStream, createWriteStream } from 'node:fs';
 import { stat } from 'node:fs/promises';
 import { Readable, Transform } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
+import { setImmediate } from 'node:timers/promises';
 import { basename } from 'node:path';
 import type { ObjectStorage } from '../domain/contracts.js';
 import type { FileMetadata, SliceOptions } from '../domain/schemas.js';
@@ -10,6 +11,14 @@ import { Uuid, FileSchema } from '../domain/schemas.js';
 import { AppError, safeError, logError } from '../domain/errors.js';
 import { Repository } from '../adapters/repository.js';
 export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
+  const validation = scanModel(name, bytes);
+  for (;;) {
+    const result = validation.next();
+    if (result.done) return result.value;
+  }
+}
+function* scanModel(name: string, bytes: Buffer): Generator<void, 'stl' | 'step'> {
+  let checkpoint = 65536;
   const ext = name.toLowerCase().split('.').pop();
   if (ext === 'step' || ext === 'stp') {
     const head = bytes.subarray(0, 1024).toString('ascii'),
@@ -24,10 +33,15 @@ export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
     const count = bytes.readUInt32LE(80);
     if (count > 0 && bytes.length === 84 + count * 50) {
       if (count > 1000000) throw new AppError('invalid_file', 'STL triangle limit exceeded', 400);
-      for (let i = 0; i < count; i++)
+      for (let i = 0; i < count; i++) {
         for (let j = 0; j < 12; j++)
           if (!Number.isFinite(bytes.readFloatLE(84 + i * 50 + j * 4)))
             throw new AppError('invalid_file', 'Non-finite STL coordinates', 400);
+        if (84 + (i + 1) * 50 >= checkpoint) {
+          checkpoint += 65536;
+          yield;
+        }
+      }
       return 'stl';
     }
   }
@@ -53,10 +67,21 @@ export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
     invalid = false,
     endsolid = false,
     first = 0;
-  while (space(first)) first++;
+  while (space(first)) {
+    first++;
+    if (first >= checkpoint) {
+      checkpoint = first + 65536;
+      yield;
+    }
+  }
   const solid =
     bytes.toString('ascii', first, first + 5).toLowerCase() === 'solid' && !word(first + 5);
-  for (let i = 0; i < bytes.length; i++) {
+  if (!solid) throw new AppError('invalid_file', 'Invalid ASCII or binary STL', 400);
+  for (let i = first + 5; i < bytes.length; i++) {
+    if (i >= checkpoint) {
+      checkpoint = i + 65536;
+      yield;
+    }
     if (matches(i, 'endsolid')) endsolid = true;
     if (!word(i - 1) && matches(i, 'endfacet') && !word(i + 8)) {
       if (++facets > 1000000) invalid = true;
@@ -64,9 +89,15 @@ export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
     } else if (!word(i - 1) && matches(i, 'vertex') && space(i + 6)) {
       let pos = i + 6;
       for (let axis = 0; axis < 3; axis++) {
-        while (space(pos)) pos++;
+        while (space(pos)) {
+          pos++;
+          if (pos >= checkpoint) {
+            checkpoint = pos + 65536;
+            yield;
+          }
+        }
         const start = pos;
-        while (pos < bytes.length && !space(pos)) pos++;
+        while (pos < bytes.length && !space(pos) && pos - start <= 1024) pos++;
         // A coordinate this long is not a useful numeric value for a model.
         if (
           pos === start ||
@@ -78,12 +109,15 @@ export function validateModel(name: string, bytes: Buffer): 'stl' | 'step' {
         }
       }
       if (invalid) break;
-      vertices++;
+      if (++vertices > 3000000) {
+        invalid = true;
+        break;
+      }
       i = pos - 1;
     }
     if (invalid) break;
   }
-  if (!solid || !endsolid || !facets || vertices !== facets * 3 || invalid)
+  if (!endsolid || !facets || vertices !== facets * 3 || invalid)
     throw new AppError('invalid_file', 'Invalid ASCII or binary STL', 400);
   return 'stl';
 }
@@ -109,7 +143,13 @@ export class FileService {
     if (file.size > this.maxUpload)
       throw new AppError('too_large', 'Upload size limit exceeded', 413);
     const bytes = Buffer.from(await file.arrayBuffer());
-    const format = validateModel(file.name, bytes);
+    const validation = scanModel(file.name, bytes);
+    let result = validation.next();
+    while (!result.done) {
+      await setImmediate();
+      result = validation.next();
+    }
+    const format = result.value;
     const name =
       basename(file.name.replaceAll('\\', '/'))
         .split('')
